@@ -32,11 +32,13 @@ class StatsDB:
     Designed to be safe to call from multiple threads (single connection + lock).
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, *, nodes_history_interval_sec: int = 60) -> None:
         self.path = str(path)
         self._lock = threading.Lock()
         self._conn = self._connect(self.path)
         self._init_schema()
+        self._nodes_history_interval_sec = max(0, int(nodes_history_interval_sec))
+        self._last_nodes_history_ts: Optional[int] = None
 
     def close(self) -> None:
         with self._lock:
@@ -111,6 +113,62 @@ class StatsDB:
 
             self._record_app_appearance(msg)
             self._record_app_request(msg)
+            self._store_message(msg, ts)
+
+    def list_messages(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        order: str = "asc",
+    ) -> List[Dict[str, Any]]:
+        limit = int(limit)
+        offset = max(0, int(offset))
+        order_dir = "DESC" if str(order).lower() == "desc" else "ASC"
+
+        with self._lock:
+            if limit <= 0:
+                rows = self._conn.execute(
+                    f"""
+                    SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum,
+                           app, request_id, want_response, text, payload_b64, error
+                    FROM messages
+                    ORDER BY rx_time {order_dir}, id {order_dir}
+                    """,
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    f"""
+                    SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum,
+                           app, request_id, want_response, text, payload_b64, error
+                    FROM messages
+                    ORDER BY rx_time {order_dir}, id {order_dir}
+                    LIMIT ? OFFSET ?
+                    """,
+                    (int(limit), int(offset)),
+                ).fetchall()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "rxTime": r["rx_time"],
+                    "fromId": r["from_id"],
+                    "toId": r["to_id"],
+                    "snr": r["snr"],
+                    "rssi": r["rssi"],
+                    "hopLimit": r["hop_limit"],
+                    "channel": r["channel"],
+                    "portnum": r["portnum"],
+                    "app": r["app"],
+                    "requestId": r["request_id"],
+                    "wantResponse": _bool_from_int(r["want_response"]),
+                    "text": r["text"],
+                    "payload_b64": r["payload_b64"],
+                    "error": r["error"],
+                }
+            )
+        return out
 
     def record_send(self, ok: bool, error: Optional[str] = None) -> None:
         with self._lock, self._conn:
@@ -140,6 +198,12 @@ class StatsDB:
         if not nodes:
             return
 
+        snapshot_ts = now_epoch()
+        should_store_history = True
+        if self._nodes_history_interval_sec > 0:
+            last_ts = self._last_nodes_history_ts
+            if last_ts is not None and snapshot_ts - last_ts < self._nodes_history_interval_sec:
+                should_store_history = False
         entries: List[
             tuple[
                 str,
@@ -151,6 +215,16 @@ class StatsDB:
                 Optional[int],
                 Optional[int],
                 Optional[float],
+            ]
+        ] = []
+        history_entries: List[
+            tuple[
+                int,
+                str,
+                Optional[float],
+                Optional[str],
+                Optional[int],
+                Optional[int],
             ]
         ] = []
         for node_id, node in nodes.items():
@@ -190,6 +264,17 @@ class StatsDB:
                     snr,
                 )
             )
+            if should_store_history:
+                history_entries.append(
+                    (
+                        snapshot_ts,
+                        node_id_str,
+                        snr,
+                        quality_bucket(snr),
+                        hops_away,
+                        last_heard_int,
+                    )
+                )
 
         if not entries:
             return
@@ -243,6 +328,16 @@ class StatsDB:
                     ) in entries
                 ],
             )
+            if history_entries:
+                self._conn.executemany(
+                    """
+                    INSERT INTO node_history(
+                      ts, node_id, snr, quality, hops_away, last_heard
+                    ) VALUES(?, ?, ?, ?, ?, ?)
+                    """,
+                    history_entries,
+                )
+                self._last_nodes_history_ts = snapshot_ts
 
     def known_node_entries(self) -> List[Dict[str, Any]]:
         now = now_epoch()
@@ -293,6 +388,55 @@ class StatsDB:
             )
 
         return out
+
+    def list_node_history(
+        self,
+        *,
+        node_id: Optional[str] = None,
+        limit: int = 500,
+        since: Optional[int] = None,
+        order: str = "desc",
+    ) -> List[Dict[str, Any]]:
+        limit = int(limit)
+        order_dir = "DESC" if str(order).lower() == "desc" else "ASC"
+        params: List[Any] = []
+        where: List[str] = []
+
+        if isinstance(node_id, str) and node_id.strip():
+            where.append("node_id = ?")
+            params.append(node_id.strip())
+        if since is not None:
+            where.append("ts >= ?")
+            params.append(int(since))
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        limit_sql = "" if limit <= 0 else "LIMIT ?"
+        if limit > 0:
+            params.append(int(limit))
+
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT ts, node_id, snr, quality, hops_away, last_heard
+                FROM node_history
+                {where_sql}
+                ORDER BY ts {order_dir}, id {order_dir}
+                {limit_sql}
+                """,
+                tuple(params),
+            ).fetchall()
+
+        return [
+            {
+                "ts": int(r["ts"]),
+                "id": str(r["node_id"]),
+                "snr": r["snr"],
+                "quality": r["quality"],
+                "hopsAway": r["hops_away"],
+                "lastHeard": r["last_heard"],
+            }
+            for r in rows
+        ]
 
     def get_node_stats(self, node_id: str) -> Optional[Dict[str, Any]]:
         node_id = str(node_id or "").strip()
@@ -474,6 +618,49 @@ class StatsDB:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS node_history (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ts INTEGER NOT NULL,
+                  node_id TEXT NOT NULL,
+                  snr REAL,
+                  quality TEXT,
+                  hops_away INTEGER,
+                  last_heard INTEGER
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_node_history_ts ON node_history(ts)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_node_history_node_ts ON node_history(node_id, ts)"
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS messages (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  rx_time INTEGER NOT NULL,
+                  from_id TEXT,
+                  to_id TEXT,
+                  snr REAL,
+                  rssi REAL,
+                  hop_limit INTEGER,
+                  channel INTEGER,
+                  portnum INTEGER,
+                  app TEXT,
+                  request_id INTEGER,
+                  want_response INTEGER,
+                  text TEXT,
+                  payload_b64 TEXT,
+                  error TEXT
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_rx_time ON messages(rx_time)"
+            )
 
     def _ensure_node_counts_columns(self) -> None:
         existing = {
@@ -517,6 +704,35 @@ class StatsDB:
             """,
             (node_id,),
         )
+
+    def _store_message(self, msg: Dict[str, Any], ts: int) -> None:
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO messages(
+                  rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum,
+                  app, request_id, want_response, text, payload_b64, error
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(ts),
+                    _to_str_or_none(msg.get("fromId")),
+                    _to_str_or_none(msg.get("toId")),
+                    _to_float_or_none(msg.get("snr")),
+                    _to_float_or_none(msg.get("rssi")),
+                    _to_int_or_none(msg.get("hopLimit")),
+                    _to_int_or_none(msg.get("channel")),
+                    _to_int_or_none(msg.get("portnum")),
+                    _to_str_or_none(msg.get("app")),
+                    _to_int_or_none(msg.get("requestId")),
+                    _bool_to_int(msg.get("wantResponse")),
+                    clamp_str(msg.get("text"), 4000),
+                    _to_str_or_none(msg.get("payload_b64")),
+                    clamp_str(msg.get("error"), 600),
+                ),
+            )
+        except Exception:
+            pass
 
     def _add_event(self, event: str, detail: Optional[str]) -> None:
         self._conn.execute(
@@ -755,6 +971,47 @@ def _firmware_from_node(node: Any) -> Optional[str]:
             if normalized:
                 return normalized
     return None
+
+
+def _to_str_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        out = value.strip()
+        return out or None
+    try:
+        out = str(value).strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def _bool_to_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, (int, float)):
+        try:
+            return 1 if int(value) != 0 else 0
+        except Exception:
+            return None
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"1", "true", "yes", "y", "on"}:
+            return 1
+        if v in {"0", "false", "no", "n", "off"}:
+            return 0
+    return None
+
+
+def _bool_from_int(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    try:
+        return bool(int(value))
+    except Exception:
+        return None
 
 
 def _normalize_firmware_value(val: Any) -> Optional[str]:

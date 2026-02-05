@@ -275,6 +275,52 @@ def test_stats_db_record_nodes_snapshot_reads_firmware_from_user_and_ignores_ver
     assert entries["!n2"]["firmware"] is None
 
 
+def test_stats_db_message_history_persists():
+    db = StatsDB(":memory:")
+    now = now_epoch()
+
+    db.record_message(
+        {
+            "rxTime": now,
+            "fromId": "!n1",
+            "toId": "!n2",
+            "snr": 1,
+            "rssi": -100,
+            "hopLimit": 3,
+            "channel": 0,
+            "portnum": 1,
+            "text": "hi",
+            "payload_b64": None,
+        }
+    )
+
+    msgs = db.list_messages(limit=10, order="asc")
+    assert len(msgs) == 1
+    assert msgs[0]["text"] == "hi"
+    assert msgs[0]["channel"] == 0
+
+
+def test_stats_db_node_history_records_quality():
+    db = StatsDB(":memory:")
+    now = now_epoch()
+
+    db.record_nodes_snapshot(
+        {
+            "!n1": {
+                "user": {"shortName": "S1", "longName": "Node One"},
+                "snr": -3,
+                "hopsAway": 2,
+                "lastHeard": now - 10,
+            }
+        }
+    )
+
+    items = db.list_node_history(node_id="!n1", limit=10, order="desc")
+    assert items
+    assert items[0]["id"] == "!n1"
+    assert items[0]["quality"] == "ok"
+
+
 def test_stats_db_known_entries_leaves_hops_away_empty_when_missing():
     db = StatsDB(":memory:")
     now = now_epoch()

@@ -264,12 +264,31 @@ def test_nodes_include_observed_toggle(client):
     assert body["total"] == 2
 
 
+def test_nodes_history_endpoint(client):
+    res = client.get("/api/nodes/history?limit=10")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is True
+    assert "items" in body
+
+    res2 = client.get("/api/node/!direct/history?limit=5")
+    assert res2.status_code == 200
+    body2 = res2.get_json()
+    assert body2["ok"] is True
+    assert body2["nodeId"] == "!direct"
+
+
 def test_messages_returns_list(client):
     res = client.get("/api/messages")
     assert res.status_code == 200
     body = res.get_json()
     assert isinstance(body, list)
     assert body[0]["text"] == "hi"
+
+    res2 = client.get("/api/messages?limit=1")
+    assert res2.status_code == 200
+    body2 = res2.get_json()
+    assert len(body2) == 1
 
 def test_stats_ok(client):
     res = client.get("/api/stats")

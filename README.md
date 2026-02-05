@@ -68,6 +68,7 @@ Options:
 
 - `./run.sh --host your-mesh-host --mesh-port 4403 --http-port 8080`
 - `./run.sh --transport mqtt --mqtt-host broker.example --mqtt-port 1883`
+- `./run.sh --nodes-history-interval 60` (store node history every 60s)
 - `./run.sh --no-check` (start even if reachability check fails)
 
 ### Manual (env vars)
@@ -108,8 +109,9 @@ Then open:
   - `HTTP_PORT` (default `8080`)
   - `NODES_REFRESH_SEC` (default `5`)
   - `MAX_MESSAGES` (default `200`)
-  - `STATS_DB_PATH` (default `meshmon.sqlite3`, set to `off` to disable)
+  - `STATS_DB_PATH` (default `meshmon.db`, set to `off` to disable)
   - `STATS_WINDOW_HOURS` (default `24`) used by `/api/stats`
+  - `NODES_HISTORY_INTERVAL_SEC` (default `60`, set `0` to store every snapshot)
 - Optional runtime update (used by the UI Settings modal):
   - `POST /api/config` (partial updates allowed), e.g. `{ "transport":"tcp", "meshHost":"...", "meshPort":4403 }` or `{ "transport":"mqtt", "mqttHost":"...", "mqttPort":1883 }`
   - Settings modal also supports **Export Config** (downloads a JSON snapshot including device config; MQTT password is never included)
@@ -138,9 +140,25 @@ Then open:
 
 Returns direct + relayed nodes (sorted by freshness; lowest `ageSec` first).
 
+### `GET /api/nodes/history`
+
+Returns history snapshots for all nodes (from SQLite). Query params:
+
+- `nodeId` (optional, filter by node)
+- `limit` (default `500`, use `0` for all)
+- `since` (epoch seconds, optional)
+- `order` (`asc` or `desc`, default `desc`)
+
 ### `GET /api/messages`
 
-Returns a list of thin messages (max 200). **Ordering: newest last (chronological).**
+Returns a list of messages from the persistent history (SQLite). **Ordering: newest last (chronological).**
+Query params:
+
+- `limit` (default `200`, use `0` for all)
+- `offset` (default `0`)
+- `order` (`asc` or `desc`, default `asc`)
+
+History is stored when `STATS_DB_PATH` is enabled (default `meshmon.db`).
 
 ### `GET /api/channels`
 
@@ -168,6 +186,14 @@ Returns persisted counters and simple aggregates (SQLite at `STATS_DB_PATH`), in
 ### `GET /api/node/<id>`
 
 Returns a combined view of live node data + persisted stats for a single node.
+
+### `GET /api/node/<id>/history`
+
+Returns history snapshots for one node (from SQLite). Query params:
+
+- `limit` (default `500`, use `0` for all)
+- `since` (epoch seconds, optional)
+- `order` (`asc` or `desc`, default `desc`)
 
 ### `POST /api/send`
 

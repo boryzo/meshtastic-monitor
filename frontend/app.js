@@ -12,6 +12,7 @@ const LS = {
   mqttTls: "meshmon.mqttTls",
   mqttRootTopic: "meshmon.mqttRootTopic",
   sendChannel: "meshmon.sendChannel",
+  messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
 
 function $(id) {
@@ -235,6 +236,19 @@ function renderNodes(nodes, filterText) {
   tbody.innerHTML = rows.join("");
 }
 
+function channelInfo(chNum) {
+  if (chNum === null || chNum === undefined || Number.isNaN(Number(chNum))) {
+    return { label: "Ch —", known: false };
+  }
+  const num = Number(chNum);
+  const info = channelsByIndex.get(num);
+  if (info) {
+    const name = info.name ? ` (${info.name})` : info.preset ? ` (${info.preset})` : "";
+    return { label: `Ch ${num}${name}`, known: true };
+  }
+  return { label: `Ch hash ${num}`, known: false };
+}
+
 function renderMessages(messages) {
   const list = $("messagesList");
   const selected = activeMessageChannel;
@@ -266,8 +280,8 @@ function renderMessages(messages) {
     const snr = m.snr === null || m.snr === undefined ? "—" : String(m.snr);
     const rssi = m.rssi === null || m.rssi === undefined ? "—" : String(m.rssi);
     const chNum = m.channel === null || m.channel === undefined ? null : Number(m.channel);
-    const chName = chNum !== null && channelsByIndex.has(chNum) ? channelsByIndex.get(chNum) : null;
-    const chLabel = chNum === null ? "Ch —" : chName ? `Ch ${chNum} (${chName})` : `Ch ${chNum}`;
+    const chMeta = channelInfo(chNum);
+    const chLabel = chMeta.label;
     const text = m.text ? escapeHtml(m.text) : `<span class="muted">port ${escapeHtml(String(m.portnum ?? "—"))}</span>`;
     const app = appNameForMessage(m);
     const isRequest = isAppRequestForMe(m, app);
@@ -572,11 +586,15 @@ function renderNodeDetails(nodeId, data) {
 
 async function tickMessages() {
   try {
-    const msgs = await apiFetch("/api/messages");
+    const limitRaw = ($("messagesHistoryLimit") && $("messagesHistoryLimit").value) || "200";
+    const limit = Number(limitRaw);
+    const qs = Number.isFinite(limit) ? `?limit=${limit}` : "";
+    const msgs = await apiFetch(`/api/messages${qs}`);
     lastMessages = msgs;
     notifyIfNewMessages(msgs);
     renderMessages(msgs);
-    let meta = `${msgs.length} messages • refresh ${new Date().toLocaleTimeString()}`;
+    const limitLabel = limitRaw === "0" ? "all" : `last ${limitRaw}`;
+    let meta = `${msgs.length} messages (${limitLabel}) • refresh ${new Date().toLocaleTimeString()}`;
     if (unreadCount > 0) meta += ` • unread ${unreadCount}`;
     $("messagesMeta").textContent = meta;
   } catch (e) {
@@ -680,11 +698,28 @@ function updateMessageChannelTabs(channels) {
   if (!container) return;
 
   const items = [{ id: "all", label: "All" }];
+  const seen = new Set();
   if (Array.isArray(channels)) {
     for (const ch of channels) {
       if (typeof ch.index !== "number") continue;
       const name = ch.name ? ` ${ch.name}` : "";
-      items.push({ id: String(ch.index), label: `#${ch.index}${name}` });
+      const preset = ch.preset ? ` (${ch.preset})` : "";
+      const id = String(ch.index);
+      items.push({ id, label: `#${ch.index}${name}${preset}` });
+      seen.add(id);
+    }
+  }
+  if (Array.isArray(lastMessages)) {
+    const observed = new Set();
+    for (const m of lastMessages) {
+      if (m.channel === null || m.channel === undefined) continue;
+      const num = Number(m.channel);
+      if (!Number.isInteger(num)) continue;
+      observed.add(String(num));
+    }
+    for (const id of Array.from(observed).sort((a, b) => Number(a) - Number(b))) {
+      if (seen.has(id)) continue;
+      items.push({ id, label: `#${id} (hash)` });
     }
   }
 
@@ -716,7 +751,8 @@ function setMessageChannel(channelId) {
 
   if (activeMessageChannel !== "all") {
     const select = $("sendChannel");
-    if (select) {
+    const num = Number(activeMessageChannel);
+    if (select && Number.isInteger(num) && channelsByIndex.has(num)) {
       select.value = String(activeMessageChannel);
       localStorage.setItem(LS.sendChannel, select.value || "");
     }
@@ -944,7 +980,10 @@ async function tickChannels() {
       for (const ch of data.channels) {
         if (typeof ch.index === "number") {
           const nm = (ch.name || "").trim();
-          if (nm) channelsByIndex.set(ch.index, nm);
+          channelsByIndex.set(ch.index, {
+            name: nm || null,
+            preset: ch.preset || null,
+          });
         }
       }
     }
@@ -994,13 +1033,32 @@ function updateSendChannelOptions(channels) {
 
   const current = (select.value || localStorage.getItem(LS.sendChannel) || "").trim();
   const opts = [`<option value="">Auto (default)</option>`];
+  const seen = new Set();
   if (Array.isArray(channels)) {
     for (const ch of channels) {
       if (typeof ch.index !== "number") continue;
       const idx = String(ch.index);
       const name = ch.name ? ` ${ch.name}` : "";
-      const label = `#${idx}${name}`;
+      const preset = ch.preset ? ` (${ch.preset})` : "";
+      const label = `#${idx}${name}${preset}`;
       opts.push(`<option value="${escapeHtml(idx)}">${escapeHtml(label)}</option>`);
+      seen.add(idx);
+    }
+  }
+  if (Array.isArray(lastMessages)) {
+    const observed = new Set();
+    for (const m of lastMessages) {
+      if (m.channel === null || m.channel === undefined) continue;
+      const num = Number(m.channel);
+      if (!Number.isInteger(num)) continue;
+      observed.add(String(num));
+    }
+    for (const idx of Array.from(observed).sort((a, b) => Number(a) - Number(b))) {
+      if (seen.has(idx)) continue;
+      const label = `#${idx} (hash)`;
+      opts.push(
+        `<option value="${escapeHtml(idx)}" disabled>${escapeHtml(label)}</option>`
+      );
     }
   }
   select.innerHTML = opts.join("");
@@ -1275,6 +1333,11 @@ function init() {
   if (savedMain) activeMainTab = savedMain;
   setMainTab(activeMainTab);
 
+  const savedHistory = localStorage.getItem(LS.messagesHistoryLimit);
+  if (savedHistory && $("messagesHistoryLimit")) {
+    $("messagesHistoryLimit").value = savedHistory;
+  }
+
   document.querySelectorAll("[data-main-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const tab = btn.getAttribute("data-main-tab") || "status";
@@ -1302,6 +1365,10 @@ function init() {
   $("btnToggleHealthJson").addEventListener("click", toggleHealthJson);
   $("sendChannel").addEventListener("change", () => {
     localStorage.setItem(LS.sendChannel, $("sendChannel").value || "");
+  });
+  $("messagesHistoryLimit").addEventListener("change", () => {
+    localStorage.setItem(LS.messagesHistoryLimit, $("messagesHistoryLimit").value || "200");
+    tickMessages();
   });
 
   $("nodesTable").addEventListener("click", onNodesHeaderClick);

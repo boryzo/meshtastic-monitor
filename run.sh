@@ -24,6 +24,7 @@ Options:
   --mqtt-tls            Use TLS for MQTT (sets MQTT_TLS=1)
   --mqtt-root-topic     MQTT root topic (optional)
   --http-port           HTTP port for the web app (default: 8080)
+  --nodes-history-interval  Node history sample interval in seconds (default: 60)
   --no-install          Skip pip install step
   --no-check            Skip reachability check
   --dev                 Also install dev requirements (pytest)
@@ -41,6 +42,7 @@ MQTT_USERNAME="${MQTT_USERNAME:-}"
 MQTT_PASSWORD="${MQTT_PASSWORD:-}"
 MQTT_TLS="${MQTT_TLS:-0}"
 MQTT_ROOT_TOPIC="${MQTT_ROOT_TOPIC:-}"
+NODES_HISTORY_INTERVAL_SEC="${NODES_HISTORY_INTERVAL_SEC:-60}"
 DO_INSTALL=1
 DO_CHECK=1
 DO_DEV=0
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --http-port)
       HTTP_PORT="${2:-}"
+      shift 2
+      ;;
+    --nodes-history-interval)
+      NODES_HISTORY_INTERVAL_SEC="${2:-}"
       shift 2
       ;;
     --no-install)
@@ -167,6 +173,7 @@ export MQTT_USERNAME="$MQTT_USERNAME"
 export MQTT_PASSWORD="$MQTT_PASSWORD"
 export MQTT_TLS="$MQTT_TLS"
 export MQTT_ROOT_TOPIC="$MQTT_ROOT_TOPIC"
+export NODES_HISTORY_INTERVAL_SEC="$NODES_HISTORY_INTERVAL_SEC"
 
 if [[ "$DO_CHECK" -eq 1 ]]; then
   if [[ "$MESH_TRANSPORT" == "mqtt" ]]; then

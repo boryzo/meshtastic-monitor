@@ -534,11 +534,14 @@ class MeshService:
 
         try:
             local = getattr(iface, "localNode", None)
+            preset = _channel_preset_name(local)
             chan_list = getattr(local, "channels", None) if local is not None else None
             if isinstance(chan_list, (list, tuple)):
                 for i, ch in enumerate(chan_list):
                     entry = _channel_entry(i, ch)
                     if entry is not None:
+                        if preset and not entry.get("preset"):
+                            entry["preset"] = preset
                         channels_out.append(entry)
         except Exception:
             channels_out = []
@@ -734,6 +737,50 @@ def _channel_entry(index: int, channel: Any) -> Optional[Dict[str, Any]]:
         "role": role_str,
         "enabled": enabled_bool,
     }
+
+
+def _channel_preset_name(local: Any) -> Optional[str]:
+    if local is None:
+        return None
+    try:
+        lc = getattr(local, "localConfig", None)
+        if lc is None:
+            return None
+        if isinstance(lc, dict):
+            val = lc.get("lora") or lc.get("loraConfig") or lc.get("lora_config")
+            if isinstance(val, dict):
+                preset = val.get("modemPreset") or val.get("modem_preset")
+                if isinstance(preset, str):
+                    return preset
+                name = getattr(preset, "name", None)
+                if isinstance(name, str):
+                    return name
+                return None
+            preset = lc.get("modemPreset") or lc.get("modem_preset")
+            if isinstance(preset, str):
+                return preset
+            name = getattr(preset, "name", None)
+            if isinstance(name, str):
+                return name
+            return None
+
+        lora = getattr(lc, "lora", None) or getattr(lc, "loraConfig", None) or getattr(lc, "lora_config", None)
+        if lora is not None:
+            preset = getattr(lora, "modemPreset", None) or getattr(lora, "modem_preset", None)
+            name = getattr(preset, "name", None)
+            if isinstance(preset, str):
+                return preset
+            if isinstance(name, str):
+                return name
+        preset = getattr(lc, "modemPreset", None) or getattr(lc, "modem_preset", None)
+        if isinstance(preset, str):
+            return preset
+        name = getattr(preset, "name", None)
+        if isinstance(name, str):
+            return name
+    except Exception:
+        return None
+    return None
 
 
 def _redact_secrets(obj: Any) -> Any:

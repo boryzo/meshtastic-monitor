@@ -99,9 +99,10 @@ def create_app(
         max_messages = _get_env_int("MAX_MESSAGES", 200)
 
         if stats_db is None:
-            stats_path = os.getenv("STATS_DB_PATH", "meshmon.sqlite3").strip()
+            stats_path = os.getenv("STATS_DB_PATH", "meshmon.db").strip()
             if stats_path.lower() not in {"", "off", "none", "disabled"}:
-                stats_db = StatsDB(stats_path)
+                history_interval = _get_env_int("NODES_HISTORY_INTERVAL_SEC", 60)
+                stats_db = StatsDB(stats_path, nodes_history_interval_sec=history_interval)
 
         mesh_service = MeshService(
             mesh_host,
@@ -210,10 +211,70 @@ def create_app(
             }
         )
 
+    @app.get("/api/nodes/history")
+    def api_nodes_history():
+        if stats_db is None:
+            return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()}), 503
+
+        limit_raw = request.args.get("limit", "500")
+        since_raw = request.args.get("since", "")
+        order = request.args.get("order", "desc")
+        node_id = request.args.get("nodeId")
+
+        def parse_int(val: str, default: int) -> int:
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        limit = parse_int(limit_raw, 500)
+        since = parse_int(since_raw, 0) if since_raw != "" else None
+
+        try:
+            history = stats_db.list_node_history(
+                node_id=node_id, limit=limit, since=since, order=order
+            )
+        except Exception:
+            history = []
+
+        return jsonify(
+            {
+                "ok": True,
+                "count": len(history),
+                "items": history,
+                "generatedAt": now_epoch(),
+            }
+        )
+
     @app.get("/api/messages")
     def api_messages():
-        # Newest last (chronological)
-        return jsonify(mesh_service.get_messages())
+        limit_raw = request.args.get("limit", "")
+        offset_raw = request.args.get("offset", "")
+        order = request.args.get("order", "asc")
+
+        def parse_int(val: str, default: int) -> int:
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        limit = parse_int(limit_raw, 200) if limit_raw != "" else 200
+        offset = parse_int(offset_raw, 0) if offset_raw != "" else 0
+
+        # Newest last (chronological) by default
+        if stats_db is not None and hasattr(stats_db, "list_messages"):
+            try:
+                return jsonify(stats_db.list_messages(limit=limit, offset=offset, order=order))
+            except Exception:
+                pass
+
+        # Fallback to in-memory messages
+        msgs = mesh_service.get_messages()
+        if limit > 0:
+            if order and str(order).lower() == "desc":
+                msgs = list(reversed(msgs))
+            msgs = msgs[: int(limit)]
+        return jsonify(msgs)
 
     @app.get("/api/channels")
     def api_channels():
@@ -319,6 +380,44 @@ def create_app(
                 "ok": True,
                 "node": node_entry(node_id, node) if isinstance(node, dict) else None,
                 "stats": stats,
+                "generatedAt": now_epoch(),
+            }
+        )
+
+    @app.get("/api/node/<path:node_id>/history")
+    def api_node_history(node_id: str):
+        node_id = str(node_id or "").strip()
+        if not node_id:
+            return jsonify({"ok": False, "error": "node id required"}), 400
+        if stats_db is None:
+            return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()}), 503
+
+        limit_raw = request.args.get("limit", "500")
+        since_raw = request.args.get("since", "")
+        order = request.args.get("order", "desc")
+
+        def parse_int(val: str, default: int) -> int:
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        limit = parse_int(limit_raw, 500)
+        since = parse_int(since_raw, 0) if since_raw != "" else None
+
+        try:
+            history = stats_db.list_node_history(
+                node_id=node_id, limit=limit, since=since, order=order
+            )
+        except Exception:
+            history = []
+
+        return jsonify(
+            {
+                "ok": True,
+                "nodeId": node_id,
+                "count": len(history),
+                "items": history,
                 "generatedAt": now_epoch(),
             }
         )
