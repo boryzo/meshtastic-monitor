@@ -1,0 +1,4 @@
+Flask>=2.3
+meshtastic>=2.0
+pypubsub>=4.0.3
+paho-mqtt>=1.6

@@ -1,0 +1,377 @@
+from __future__ import annotations
+
+if __name__ == "__main__" and __package__ is None:
+    # Allow `python backend/app.py` by ensuring repo root is on sys.path *before* imports.
+    import sys
+    from pathlib import Path as _Path
+
+    _repo_root = str(_Path(__file__).resolve().parent.parent)
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+
+import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
+
+from flask import Flask, Response, jsonify, request
+
+from backend.jsonsafe import node_entry, now_epoch
+from backend.mesh_service import MeshService
+from backend.stats_db import StatsDB
+
+
+def _get_env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except Exception:
+        return default
+
+
+def _get_env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _split_nodes(
+    nodes: Dict[str, Dict[str, Any]],
+) -> Tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+    direct: list[Dict[str, Any]] = []
+    relayed: list[Dict[str, Any]] = []
+
+    for node_id, node in nodes.items():
+        entry = node_entry(str(node_id), node)
+        if entry.get("snr") is None:
+            entry.pop("quality", None)
+            relayed.append(entry)
+        else:
+            direct.append(entry)
+
+    def sort_key(item: Dict[str, Any]) -> Tuple[int, int]:
+        age = item.get("ageSec")
+        if age is None:
+            return (1, 10**12)
+        return (0, int(age))
+
+    direct.sort(key=sort_key)
+    relayed.sort(key=sort_key)
+    return direct, relayed
+
+
+def create_app(
+    *,
+    mesh_service: Optional[Any] = None,
+    frontend_dir: Optional[Path] = None,
+    stats_db: Optional[Any] = None,
+) -> Flask:
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    root_dir = Path(__file__).resolve().parent.parent
+    frontend_path = frontend_dir or (root_dir / "frontend")
+
+    app = Flask(
+        __name__,
+        static_folder=str(frontend_path),
+        static_url_path="/static",
+    )
+
+    # Service init
+    if mesh_service is None:
+        mesh_transport = os.getenv("MESH_TRANSPORT", "tcp")
+        mesh_host = os.getenv("MESH_HOST", "").strip()
+        mesh_port = _get_env_int("MESH_PORT", 4403)
+        mqtt_host = os.getenv("MQTT_HOST", "mqtt.meshtastic.org")
+        mqtt_port = _get_env_int("MQTT_PORT", 1883)
+        mqtt_username = os.getenv("MQTT_USERNAME") or None
+        mqtt_password = os.getenv("MQTT_PASSWORD") or None
+        mqtt_tls = _get_env_bool("MQTT_TLS", False)
+        mqtt_root_topic = os.getenv("MQTT_ROOT_TOPIC") or None
+
+        nodes_refresh_sec = _get_env_int("NODES_REFRESH_SEC", 5)
+        max_messages = _get_env_int("MAX_MESSAGES", 200)
+
+        if stats_db is None:
+            stats_path = os.getenv("STATS_DB_PATH", "meshmon.sqlite3").strip()
+            if stats_path.lower() not in {"", "off", "none", "disabled"}:
+                stats_db = StatsDB(stats_path)
+
+        mesh_service = MeshService(
+            mesh_host,
+            mesh_port,
+            transport=mesh_transport,
+            mqtt_host=mqtt_host,
+            mqtt_port=mqtt_port,
+            mqtt_username=mqtt_username,
+            mqtt_password=mqtt_password,
+            mqtt_tls=mqtt_tls,
+            mqtt_root_topic=mqtt_root_topic,
+            nodes_refresh_sec=nodes_refresh_sec,
+            max_messages=max_messages,
+            stats_db=stats_db,
+        )
+        mesh_service.start()
+
+    # --- frontend routes
+    @app.get("/")
+    def index() -> Response:
+        return app.send_static_file("index.html")
+
+    # --- API
+    @app.get("/api/health")
+    def api_health():
+        cfg = mesh_service.get_config()
+        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
+        return jsonify(
+            {
+                "ok": True,
+                "transport": cfg.transport,
+                "configured": configured,
+                "meshHost": (cfg.mesh_host or None),
+                "meshPort": cfg.mesh_port,
+                "mqttHost": cfg.mqtt_host,
+                "mqttPort": cfg.mqtt_port,
+                "mqttUsername": cfg.mqtt_username,
+                "mqttTls": bool(cfg.mqtt_tls),
+                "mqttRootTopic": cfg.mqtt_root_topic,
+                "mqttPasswordSet": bool(cfg.mqtt_password),
+                "connected": bool(mesh_service.is_connected()),
+                "lastError": mesh_service.last_error(),
+                "generatedAt": now_epoch(),
+            }
+        )
+
+    @app.get("/api/nodes")
+    def api_nodes():
+        include_observed_raw = request.args.get("includeObserved", "1")
+        include_observed = str(include_observed_raw).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
+
+        nodes = mesh_service.get_nodes_snapshot()
+        direct, relayed = _split_nodes(nodes)
+
+        mesh_count = len(nodes)
+        observed_count = 0
+        observed_added = 0
+
+        if include_observed and stats_db is not None:
+            known_fn = getattr(stats_db, "known_node_entries", None)
+            if callable(known_fn):
+                try:
+                    known = list(known_fn())
+                except Exception:
+                    known = []
+
+                observed_count = len(known)
+                existing_ids = {n.get("id") for n in direct + relayed}
+                for entry in known:
+                    node_id = entry.get("id")
+                    if not node_id or node_id in existing_ids:
+                        continue
+                    if entry.get("snr") is None:
+                        entry.pop("quality", None)
+                        relayed.append(entry)
+                    else:
+                        direct.append(entry)
+                    existing_ids.add(node_id)
+                    observed_added += 1
+
+                def sort_key(item: Dict[str, Any]) -> Tuple[int, int]:
+                    age = item.get("ageSec")
+                    if age is None:
+                        return (1, 10**12)
+                    return (0, int(age))
+
+                direct.sort(key=sort_key)
+                relayed.sort(key=sort_key)
+
+        return jsonify(
+            {
+                "total": len(direct) + len(relayed),
+                "meshCount": mesh_count,
+                "observedCount": observed_count,
+                "observedAdded": observed_added,
+                "includeObserved": include_observed,
+                "direct": direct,
+                "relayed": relayed,
+                "generatedAt": now_epoch(),
+            }
+        )
+
+    @app.get("/api/messages")
+    def api_messages():
+        # Newest last (chronological)
+        return jsonify(mesh_service.get_messages())
+
+    @app.get("/api/channels")
+    def api_channels():
+        channels = mesh_service.get_channels_snapshot()
+        return jsonify(
+            {
+                "total": len(channels),
+                "channels": channels,
+                "generatedAt": now_epoch(),
+            }
+        )
+
+    @app.get("/api/stats")
+    def api_stats():
+        if stats_db is None:
+            return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()})
+
+        hours = _get_env_int("STATS_WINDOW_HOURS", 24)
+        summary = stats_db.summary(hours=hours)
+        cfg = mesh_service.get_config()
+        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
+
+        return jsonify(
+            {
+                "ok": True,
+                "dbPath": summary.db_path,
+                "generatedAt": summary.generated_at,
+                "transport": cfg.transport,
+                "configured": configured,
+                "meshHost": (cfg.mesh_host or None),
+                "meshPort": cfg.mesh_port,
+                "mqttHost": cfg.mqtt_host,
+                "mqttPort": cfg.mqtt_port,
+                "connected": bool(mesh_service.is_connected()),
+                "lastError": mesh_service.last_error(),
+                "counters": summary.counters,
+                "messages": {
+                    "lastHour": summary.messages_last_hour,
+                    "windowHours": summary.window_hours,
+                    "window": summary.messages_window,
+                    "hourlyWindow": summary.hourly_window,
+                },
+                "nodes": {
+                    "topFrom": summary.top_from,
+                    "topTo": summary.top_to,
+                },
+                "events": summary.recent_events,
+            }
+        )
+
+    @app.post("/api/send")
+    def api_send():
+        body = request.get_json(silent=True) or {}
+        text = body.get("text")
+        to = body.get("to")
+
+        if not isinstance(text, str) or not text.strip():
+            return jsonify({"ok": False, "error": "text is required"}), 400
+
+        to_clean = None
+        if isinstance(to, str) and to.strip():
+            to_clean = to.strip()
+
+        try:
+            mesh_service.send_text(text.strip(), to_clean)
+            if stats_db is not None:
+                stats_db.record_send(ok=True)
+            return jsonify({"ok": True})
+        except Exception as e:
+            if stats_db is not None:
+                stats_db.record_send(ok=False, error=f"{type(e).__name__}: {e}")
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+
+    @app.post("/api/config")
+    def api_config():
+        """
+        Optional runtime reconfiguration. Useful for local UI settings without editing env vars.
+        """
+        body = request.get_json(silent=True) or {}
+        transport = body.get("transport")
+        mesh_host = body.get("meshHost")
+        mesh_port = body.get("meshPort")
+        mqtt_host = body.get("mqttHost")
+        mqtt_port = body.get("mqttPort")
+        mqtt_username = body.get("mqttUsername")
+        mqtt_password = body.get("mqttPassword")
+        mqtt_tls = body.get("mqttTls")
+        mqtt_root_topic = body.get("mqttRootTopic")
+
+        kwargs: Dict[str, Any] = {}
+
+        if transport is not None:
+            if not isinstance(transport, str):
+                return jsonify({"ok": False, "error": "transport must be a string"}), 400
+            kwargs["transport"] = transport
+
+        if mesh_host is not None:
+            if not isinstance(mesh_host, str) or not mesh_host.strip():
+                return jsonify({"ok": False, "error": "meshHost must be a non-empty string"}), 400
+            kwargs["mesh_host"] = mesh_host.strip()
+
+        if mesh_port is not None:
+            try:
+                kwargs["mesh_port"] = int(mesh_port)
+            except Exception:
+                return jsonify({"ok": False, "error": "meshPort must be an int"}), 400
+
+        if mqtt_host is not None:
+            if not isinstance(mqtt_host, str) or not mqtt_host.strip():
+                return jsonify({"ok": False, "error": "mqttHost must be a non-empty string"}), 400
+            kwargs["mqtt_host"] = mqtt_host.strip()
+
+        if mqtt_port is not None:
+            try:
+                kwargs["mqtt_port"] = int(mqtt_port)
+            except Exception:
+                return jsonify({"ok": False, "error": "mqttPort must be an int"}), 400
+
+        if mqtt_username is not None:
+            if not isinstance(mqtt_username, str):
+                return jsonify({"ok": False, "error": "mqttUsername must be a string"}), 400
+            kwargs["mqtt_username"] = mqtt_username
+
+        if mqtt_password is not None:
+            if not isinstance(mqtt_password, str):
+                return jsonify({"ok": False, "error": "mqttPassword must be a string"}), 400
+            kwargs["mqtt_password"] = mqtt_password
+
+        if mqtt_tls is not None:
+            if isinstance(mqtt_tls, bool):
+                kwargs["mqtt_tls"] = mqtt_tls
+            elif isinstance(mqtt_tls, str):
+                kwargs["mqtt_tls"] = mqtt_tls.strip().lower() in {"1", "true", "yes", "y", "on"}
+            else:
+                return jsonify({"ok": False, "error": "mqttTls must be a boolean"}), 400
+
+        if mqtt_root_topic is not None:
+            if not isinstance(mqtt_root_topic, str):
+                return jsonify({"ok": False, "error": "mqttRootTopic must be a string"}), 400
+            kwargs["mqtt_root_topic"] = mqtt_root_topic
+
+        if not kwargs:
+            return jsonify({"ok": False, "error": "no config fields provided"}), 400
+
+        try:
+            mesh_service.reconfigure(**kwargs)
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 400
+
+    return app
+
+
+def main() -> None:
+    http_port = _get_env_int("HTTP_PORT", 8080)
+    app = create_app()
+    app.run(host="0.0.0.0", port=http_port, debug=False, threaded=True)
+
+
+if __name__ == "__main__":
+    main()

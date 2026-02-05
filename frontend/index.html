@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meshtastic Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="title">Meshtastic Monitor</div>
+        <div class="subtitle">
+          Mesh: <span id="meshHost">—</span>
+          <span class="dot">•</span>
+          <span id="connStatus" class="status status-unknown">Checking…</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="btnSettings" class="btn">Settings</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="card-header">
+          <h2>Status</h2>
+          <div class="row">
+            <button id="btnCopyHealthJson" class="btn btn-secondary" type="button">
+              Copy JSON
+            </button>
+            <button id="btnToggleHealthJson" class="btn btn-secondary" type="button">
+              Show JSON
+            </button>
+            <a
+              id="btnOpenHealthJson"
+              class="btn btn-secondary"
+              href="/api/health"
+              target="_blank"
+              rel="noreferrer"
+              >Open JSON</a
+            >
+          </div>
+        </div>
+        <div id="healthDetails" class="kv">
+          <div class="muted">Loading…</div>
+        </div>
+        <pre id="healthJson" class="code hidden"></pre>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Nodes</h2>
+          <div class="row">
+            <input
+              id="nodeFilter"
+              class="input"
+              placeholder="Filter by short/long/id…"
+              autocomplete="off"
+            />
+            <div class="tabs">
+              <button id="tabDirect" class="tab active" data-tab="direct">Direct</button>
+              <button id="tabRelayed" class="tab" data-tab="relayed">Relayed</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" id="nodesTable">
+            <thead>
+              <tr>
+                <th>Short</th>
+                <th>Long</th>
+                <th class="col-snr">SNR</th>
+                <th class="col-quality">Quality</th>
+                <th class="col-hops">Hops</th>
+                <th>Last Seen</th>
+                <th class="col-id">ID</th>
+              </tr>
+            </thead>
+            <tbody id="nodesTbody">
+              <tr>
+                <td colspan="7" class="muted">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer muted" id="nodesMeta">—</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Channels</h2>
+          <div class="row">
+            <div class="muted" id="channelsMeta">—</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="channelsTable">
+            <thead>
+              <tr>
+                <th class="col-ch-index">#</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Enabled</th>
+              </tr>
+            </thead>
+            <tbody id="channelsTbody">
+              <tr>
+                <td colspan="4" class="muted">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Messages</h2>
+          <div class="row">
+            <div class="muted" id="messagesMeta">—</div>
+          </div>
+        </div>
+
+        <div id="messagesList" class="messages"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Send</h2>
+        </div>
+
+        <form id="sendForm" class="send">
+          <div class="field">
+            <label for="sendText">Text</label>
+            <textarea id="sendText" class="input" rows="3" required></textarea>
+          </div>
+          <div class="field">
+            <label for="sendTo">To (optional node id)</label>
+            <input id="sendTo" class="input" placeholder="!abcd1234" />
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" type="submit">Send</button>
+            <div id="sendResult" class="muted"></div>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <!-- Settings modal -->
+    <div id="modalBackdrop" class="backdrop hidden" aria-hidden="true"></div>
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="modal-header">
+        <h3>Settings</h3>
+        <button id="btnCloseModal" class="btn btn-secondary" type="button">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="apiBaseUrl">API Base URL (optional)</label>
+          <input id="apiBaseUrl" class="input" placeholder="http://localhost:8080" />
+          <div class="hint">Leave blank when using the built-in UI.</div>
+        </div>
+
+        <div class="field">
+          <label for="transportSelect">Connection</label>
+          <select id="transportSelect" class="input">
+            <option value="tcp">TCP (direct to node)</option>
+            <option value="mqtt">MQTT (broker)</option>
+          </select>
+          <div class="hint">TCP is recommended for a local node.</div>
+        </div>
+
+        <div id="tcpSettings" class="row">
+          <div class="field">
+            <label for="meshHostInput">Meshtastic IP / Host</label>
+            <input id="meshHostInput" class="input" placeholder="your-mesh-host" />
+          </div>
+          <div class="field">
+            <label for="meshPortInput">Port</label>
+            <input id="meshPortInput" class="input" placeholder="4403" inputmode="numeric" />
+          </div>
+        </div>
+
+        <div id="mqttSettings" class="hidden">
+          <div class="row">
+            <div class="field">
+              <label for="mqttHostInput">MQTT Host</label>
+              <input id="mqttHostInput" class="input" placeholder="mqtt.meshtastic.org" />
+            </div>
+            <div class="field">
+              <label for="mqttPortInput">MQTT Port</label>
+              <input id="mqttPortInput" class="input" placeholder="1883" inputmode="numeric" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="mqttUsernameInput">MQTT Username (optional)</label>
+              <input id="mqttUsernameInput" class="input" placeholder="username" />
+            </div>
+            <div class="field">
+              <label for="mqttPasswordInput">MQTT Password (optional)</label>
+              <input id="mqttPasswordInput" class="input" type="password" placeholder="password" />
+              <div class="hint">If left blank, password is not changed on the backend.</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="mqttRootTopicInput">MQTT Root Topic (optional)</label>
+              <input id="mqttRootTopicInput" class="input" placeholder="msh/#" />
+              <div class="hint">Leave blank to use library defaults.</div>
+            </div>
+            <div class="field">
+              <label for="mqttTlsInput">TLS</label>
+              <label class="check">
+                <input id="mqttTlsInput" type="checkbox" />
+                <span>Use TLS</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="row">
+          <button id="btnSaveSettings" class="btn btn-primary" type="button">
+            Save & Apply
+          </button>
+          <button id="btnExportSettings" class="btn btn-secondary" type="button">
+            Export Config
+          </button>
+        </div>
+        <div class="hint">Settings are applied via <code>/api/config</code>.</div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
