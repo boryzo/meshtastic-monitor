@@ -16,13 +16,14 @@ def client():
     svc.seed_nodes(
         {
             "!direct": {
-                "user": {"shortName": "D", "longName": "Direct"},
+                "user": {"shortName": "D", "longName": "Direct", "role": "CLIENT", "hwModel": "TBEAM"},
+                "firmwareVersion": "2.4.0",
                 "snr": 1,
                 "hopsAway": 1,
                 "lastHeard": int(time.time()),
             },
             "!relay": {
-                "user": {"shortName": "R", "longName": "Relayed"},
+                "user": {"shortName": "R", "longName": "Relayed", "role": "ROUTER", "hwModel": "HELTEC_V3"},
                 "snr": None,
                 "hopsAway": 2,
                 "lastHeard": int(time.time()) - 10,
@@ -53,6 +54,7 @@ def client():
     )
 
     stats_db = StatsDB(":memory:")
+    stats_db.record_nodes_snapshot(svc.get_nodes_snapshot())
     # Seed one message into stats so /api/stats has something interesting.
     stats_db.record_message(
         {
@@ -132,9 +134,124 @@ def test_nodes_split_direct_and_relayed(client):
     relayed = next(n for n in body["relayed"] if n["id"] == "!relay")
     assert direct["hopsAway"] == 1
     assert relayed["hopsAway"] == 2
+    assert direct["role"] == "CLIENT"
+    assert direct["hwModel"] == "TBEAM"
+    assert direct["firmware"] == "2.4.0"
+    assert relayed["role"] == "ROUTER"
+    assert relayed["hwModel"] == "HELTEC_V3"
 
     # Relayed nodes omit quality
     assert relayed.get("quality") is None
+
+
+def test_nodes_leaves_hops_away_empty_when_missing():
+    svc = FakeMeshService()
+    svc.start()
+    svc.seed_nodes(
+        {
+            "!direct": {
+                "user": {"shortName": "D", "longName": "Direct"},
+                "snr": 1,
+                "lastHeard": int(time.time()),
+            },
+        }
+    )
+
+    stats_db = StatsDB(":memory:")
+    app = create_app(mesh_service=svc, stats_db=stats_db)
+    app.testing = True
+    c = app.test_client()
+
+    body = c.get("/api/nodes?includeObserved=0").get_json()
+    direct = next(n for n in body["direct"] if n["id"] == "!direct")
+    assert direct["hopsAway"] is None
+
+
+def test_radio_endpoint_returns_node():
+    svc = FakeMeshService()
+    svc.start()
+    svc.seed_radio(
+        {
+            "user": {"id": "!me", "shortName": "ME", "longName": "My Radio", "hwModel": "TBEAM"},
+            "snr": 2.5,
+            "lastHeard": int(time.time()),
+        }
+    )
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    body = c.get("/api/radio").get_json()
+    assert body["ok"] is True
+    assert body["node"]["id"] == "!me"
+    assert body["node"]["hopsAway"] == 1
+
+
+def test_radio_endpoint_returns_none_when_unavailable():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    body = c.get("/api/radio").get_json()
+    assert body["ok"] is True
+    assert body["node"] is None
+
+
+def test_device_config_endpoint_redacts_psk_by_default():
+    svc = FakeMeshService()
+    svc.start()
+    svc.seed_device_config(
+        {
+            "localConfig": {"foo": 1},
+            "moduleConfig": {"bar": 2},
+            "channels": [{"index": 0, "name": "Primary", "psk": "abcd"}],
+            "metadata": {"hwModel": "TBEAM"},
+            "myInfo": {"id": "!me"},
+        }
+    )
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    body = c.get("/api/device/config").get_json()
+    assert body["ok"] is True
+    assert body["secretsIncluded"] is False
+    assert body["device"]["channels"][0]["psk"] == "***redacted***"
+
+    body2 = c.get("/api/device/config?includeSecrets=1").get_json()
+    assert body2["ok"] is True
+    assert body2["secretsIncluded"] is True
+    assert body2["device"]["channels"][0]["psk"] == "abcd"
+
+
+def test_device_config_endpoint_returns_503_when_missing():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.get("/api/device/config")
+    assert res.status_code == 503
+    body = res.get_json()
+    assert body["ok"] is False
+    assert "error" in body
+
+
+def test_node_details_endpoint_returns_node_and_stats(client):
+    res = client.get("/api/node/!direct")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is True
+    assert body["node"]["id"] == "!direct"
+    assert body["stats"] is not None
+
+
+def test_node_details_endpoint_404_when_missing(client):
+    res = client.get("/api/node/!missing")
+    assert res.status_code == 404
 
 
 def test_nodes_include_observed_toggle(client):
@@ -161,6 +278,9 @@ def test_stats_ok(client):
     assert body["ok"] is True
     assert "counters" in body
     assert body["counters"]["messages_total"] >= 1
+    assert "apps" in body
+    assert "counts" in body["apps"]
+    assert "requestsToMe" in body["apps"]
 
 
 def test_send_requires_text(client):
@@ -179,6 +299,30 @@ def test_send_ok(client):
     body = res2.get_json()
     assert body["counters"]["send_total"] >= 1
 
+
+def test_send_channel_ok():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.post("/api/send", json={"text": "hello", "channel": 1})
+    assert res.status_code == 200
+    assert res.get_json()["ok"] is True
+    assert svc.sent[-1] == ("hello", None, 1)
+
+
+def test_send_channel_invalid():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.post("/api/send", json={"text": "hello", "channel": "bad"})
+    assert res.status_code == 400
+    assert res.get_json()["ok"] is False
 
 def test_config_requires_at_least_one_field(client):
     res = client.post("/api/config", json={})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -252,8 +253,67 @@ class MeshService:
         with self._channels_lock:
             return list(self._channels_cache)
 
+    def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
+        iface = self._get_iface()
+        if iface is None:
+            return None
+        try:
+            getter = getattr(iface, "getMyNodeInfo", None)
+            if callable(getter):
+                return getter()
+        except Exception:
+            return None
+        return None
+
+    def get_device_config(self, *, include_secrets: bool = False) -> Optional[Dict[str, Any]]:
+        iface = self._get_iface()
+        if iface is None:
+            return None
+
+        try:
+            from meshtastic.util import message_to_json  # type: ignore
+        except Exception:
+            return None
+
+        local = getattr(iface, "localNode", None)
+        if local is None:
+            return None
+
+        def pb_to_dict(pb: Any) -> Optional[Dict[str, Any]]:
+            if pb is None:
+                return None
+            try:
+                return json.loads(message_to_json(pb))
+            except Exception:
+                return None
+
+        local_config = pb_to_dict(getattr(local, "localConfig", None))
+        module_config = pb_to_dict(getattr(local, "moduleConfig", None))
+
+        channels: List[Dict[str, Any]] = []
+        chan_list = getattr(local, "channels", None)
+        if isinstance(chan_list, (list, tuple)):
+            for ch in chan_list:
+                d = pb_to_dict(ch)
+                if isinstance(d, dict):
+                    channels.append(d)
+
+        if not include_secrets:
+            channels = [_redact_secrets(c) for c in channels]
+
+        metadata = pb_to_dict(getattr(iface, "metadata", None))
+        my_info = pb_to_dict(getattr(iface, "myInfo", None))
+
+        return {
+            "localConfig": local_config,
+            "moduleConfig": module_config,
+            "channels": channels,
+            "metadata": metadata,
+            "myInfo": my_info,
+        }
+
     # ---- actions
-    def send_text(self, text: str, to: Optional[str] = None) -> None:
+    def send_text(self, text: str, to: Optional[str] = None, channel: Optional[int] = None) -> None:
         text = str(text or "").strip()
         if not text:
             raise ValueError("text is required")
@@ -263,16 +323,36 @@ class MeshService:
             raise RuntimeError("not connected to mesh")
 
         try:
+            if channel is None:
+                if to:
+                    iface.sendText(text, destinationId=to)
+                else:
+                    iface.sendText(text)
+                return
+
+            ch_idx = int(channel)
             if to:
-                iface.sendText(text, destinationId=to)
+                iface.sendText(text, destinationId=to, channelIndex=ch_idx)
             else:
-                iface.sendText(text)
+                iface.sendText(text, channelIndex=ch_idx)
+            return
         except TypeError:
             # Some versions use a different param name
+            if channel is None:
+                if to:
+                    iface.sendText(text, destination=to)
+                else:
+                    iface.sendText(text)
+                return
+            ch_idx = int(channel)
             if to:
-                iface.sendText(text, destination=to)
+                iface.sendText(text, destination=to, channel=ch_idx)
             else:
-                iface.sendText(text)
+                iface.sendText(text, channel=ch_idx)
+            return
+        except Exception:
+            # Let other errors bubble up
+            raise
 
     # ---- internal
     def _set_connected(self, connected: bool) -> None:
@@ -531,7 +611,9 @@ class FakeMeshService:
         self._nodes: Dict[str, Dict[str, Any]] = {}
         self._messages: List[Dict[str, Any]] = []
         self._channels: List[Dict[str, Any]] = []
-        self.sent: List[Tuple[str, Optional[str]]] = []
+        self._radio: Optional[Dict[str, Any]] = None
+        self._device_config: Optional[Dict[str, Any]] = None
+        self.sent: List[Tuple[str, Optional[str], Optional[int]]] = []
 
     def start(self) -> None:  # noqa: D401
         self._connected = True
@@ -580,10 +662,21 @@ class FakeMeshService:
     def get_channels_snapshot(self) -> List[Dict[str, Any]]:
         return list(self._channels)
 
-    def send_text(self, text: str, to: Optional[str] = None) -> None:
+    def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
+        return dict(self._radio) if isinstance(self._radio, dict) else None
+
+    def get_device_config(self, *, include_secrets: bool = False) -> Optional[Dict[str, Any]]:
+        if not isinstance(self._device_config, dict):
+            return None
+        if include_secrets:
+            return dict(self._device_config)
+        return _redact_secrets(self._device_config)
+
+    def send_text(self, text: str, to: Optional[str] = None, channel: Optional[int] = None) -> None:
         if not text:
             raise ValueError("text is required")
-        self.sent.append((text, to))
+        ch = int(channel) if channel is not None else None
+        self.sent.append((text, to, ch))
 
     # helpers for tests
     def seed_nodes(self, nodes: Dict[str, Dict[str, Any]]) -> None:
@@ -594,6 +687,12 @@ class FakeMeshService:
 
     def seed_channels(self, channels: List[Dict[str, Any]]) -> None:
         self._channels = list(channels)
+
+    def seed_radio(self, node: Dict[str, Any]) -> None:
+        self._radio = dict(node)
+
+    def seed_device_config(self, cfg: Dict[str, Any]) -> None:
+        self._device_config = dict(cfg)
 
 
 def _channel_entry(index: int, channel: Any) -> Optional[Dict[str, Any]]:
@@ -635,6 +734,20 @@ def _channel_entry(index: int, channel: Any) -> Optional[Dict[str, Any]]:
         "role": role_str,
         "enabled": enabled_bool,
     }
+
+
+def _redact_secrets(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out: Dict[str, Any] = {}
+        for k, v in obj.items():
+            if str(k).lower() == "psk":
+                out[k] = "***redacted***"
+            else:
+                out[k] = _redact_secrets(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact_secrets(v) for v in obj]
+    return obj
 
 
 def _get_path(obj: Any, *paths: str) -> Any:

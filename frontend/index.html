@@ -17,13 +17,18 @@
         </div>
       </div>
 
-      <div class="actions">
-        <button id="btnSettings" class="btn">Settings</button>
-      </div>
+      <nav class="actions top-nav" aria-label="Primary">
+        <button class="btn" data-main-tab="nodes">🧭 Nodes</button>
+        <button class="btn" data-main-tab="messages">💬 Messages</button>
+        <button class="btn" data-main-tab="status">🟢 Status</button>
+        <button class="btn" data-main-tab="stats">📊 Stats</button>
+        <button class="btn" data-main-tab="radio">📻 My Radio</button>
+        <button id="btnSettings" class="btn">⚙️ Settings</button>
+      </nav>
     </header>
 
     <main class="container">
-      <section class="card">
+      <section class="card tab-panel active" data-tab="status">
         <div class="card-header">
           <h2>Status</h2>
           <div class="row">
@@ -49,7 +54,7 @@
         <pre id="healthJson" class="code hidden"></pre>
       </section>
 
-      <section class="card">
+      <section class="card tab-panel" data-tab="nodes">
         <div class="card-header">
           <h2>Nodes</h2>
           <div class="row">
@@ -72,16 +77,18 @@
               <tr>
                 <th>Short</th>
                 <th>Long</th>
-                <th class="col-snr">SNR</th>
-                <th class="col-quality">Quality</th>
-                <th class="col-hops">Hops</th>
-                <th>Last Seen</th>
+                <th class="col-role">Role</th>
+                <th class="col-device">Device</th>
+                <th class="col-snr sortable" data-sort="snr">SNR</th>
+                <th class="col-quality sortable" data-sort="quality">Quality</th>
+                <th class="col-hops sortable" data-sort="hops">Hops</th>
+                <th class="sortable" data-sort="age">Last Seen</th>
                 <th class="col-id">ID</th>
               </tr>
             </thead>
             <tbody id="nodesTbody">
               <tr>
-                <td colspan="7" class="muted">Loading…</td>
+                <td colspan="9" class="muted">Loading…</td>
               </tr>
             </tbody>
           </table>
@@ -89,7 +96,19 @@
         <div class="card-footer muted" id="nodesMeta">—</div>
       </section>
 
-      <section class="card">
+      <section class="card tab-panel" data-tab="nodes">
+        <div class="card-header">
+          <h2>Node Details</h2>
+          <div class="row">
+            <div class="muted" id="nodeDetailsMeta">Select a node…</div>
+          </div>
+        </div>
+        <div id="nodeDetails" class="kv">
+          <div class="muted">Click a node row to view stats.</div>
+        </div>
+      </section>
+
+      <section class="card tab-panel" data-tab="nodes">
         <div class="card-header">
           <h2>Channels</h2>
           <div class="row">
@@ -115,21 +134,16 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card tab-panel" data-tab="messages">
         <div class="card-header">
           <h2>Messages</h2>
           <div class="row">
             <div class="muted" id="messagesMeta">—</div>
+            <div id="messageChannelTabs" class="tabs small"></div>
           </div>
         </div>
 
         <div id="messagesList" class="messages"></div>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>Send</h2>
-        </div>
 
         <form id="sendForm" class="send">
           <div class="field">
@@ -140,11 +154,72 @@
             <label for="sendTo">To (optional node id)</label>
             <input id="sendTo" class="input" placeholder="!abcd1234" />
           </div>
+          <div class="field">
+            <label for="sendChannel">Channel</label>
+            <select id="sendChannel" class="input">
+              <option value="">Auto (default)</option>
+            </select>
+            <div class="hint">Pick a channel to send on, or leave Auto.</div>
+          </div>
           <div class="row">
             <button class="btn btn-primary" type="submit">Send</button>
             <div id="sendResult" class="muted"></div>
           </div>
         </form>
+      </section>
+
+      <section class="card tab-panel" data-tab="stats">
+        <div class="card-header">
+          <h2>Stats</h2>
+          <div class="row">
+            <div class="muted" id="statsMeta">—</div>
+          </div>
+        </div>
+        <div id="statsSummary" class="stats-grid">
+          <div class="muted">Loading…</div>
+        </div>
+        <div class="stats-panels">
+          <div class="panel wide">
+            <h3>Nodes visible (live)</h3>
+            <div id="statsNodesVisible" class="bars"></div>
+          </div>
+          <div class="panel wide">
+            <h3>Messages (hourly)</h3>
+            <div id="statsHourly" class="bars"></div>
+          </div>
+          <div class="panel">
+            <h3>Apps</h3>
+            <div id="statsApps" class="list"></div>
+          </div>
+          <div class="panel">
+            <h3>Requests to Me</h3>
+            <div id="statsAppRequests" class="list"></div>
+          </div>
+          <div class="panel">
+            <h3>Top From</h3>
+            <div id="statsTopFrom" class="list"></div>
+          </div>
+          <div class="panel">
+            <h3>Top To</h3>
+            <div id="statsTopTo" class="list"></div>
+          </div>
+          <div class="panel">
+            <h3>Recent Events</h3>
+            <div id="statsEvents" class="list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card tab-panel" data-tab="radio">
+        <div class="card-header">
+          <h2>My Radio</h2>
+          <div class="row">
+            <div class="muted" id="radioMeta">—</div>
+          </div>
+        </div>
+        <div id="radioDetails" class="kv">
+          <div class="muted">Loading…</div>
+        </div>
       </section>
     </main>
 

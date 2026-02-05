@@ -21,6 +21,8 @@ class StatsSummary:
     top_from: List[Dict[str, Any]]
     top_to: List[Dict[str, Any]]
     recent_events: List[Dict[str, Any]]
+    app_counts: List[Dict[str, Any]]
+    app_requests_to_me: List[Dict[str, Any]]
 
 
 class StatsDB:
@@ -107,6 +109,9 @@ class StatsDB:
                     (to_id,),
                 )
 
+            self._record_app_appearance(msg)
+            self._record_app_request(msg)
+
     def record_send(self, ok: bool, error: Optional[str] = None) -> None:
         with self._lock, self._conn:
             self._incr_counter("send_total", 1)
@@ -135,25 +140,56 @@ class StatsDB:
         if not nodes:
             return
 
-        entries: List[tuple[str, Optional[str], Optional[str], Optional[int], Optional[int], Optional[float]]] = []
+        entries: List[
+            tuple[
+                str,
+                Optional[str],
+                Optional[str],
+                Optional[str],
+                Optional[str],
+                Optional[str],
+                Optional[int],
+                Optional[int],
+                Optional[float],
+            ]
+        ] = []
         for node_id, node in nodes.items():
             node_id_str = str(node_id)
             if not node_id_str:
                 continue
             user = (node.get("user") or {}) if isinstance(node, dict) else {}
-            short = clamp_str(user.get("shortName"), 40)
-            long = clamp_str(user.get("longName"), 80)
+            short = clamp_str(user.get("shortName") or user.get("short_name"), 40)
+            long = clamp_str(user.get("longName") or user.get("long_name"), 80)
+            role = clamp_str(_role_str(user.get("role")), 40) if isinstance(user, dict) else None
+            hw_model = clamp_str(user.get("hwModel") or user.get("hw_model") or user.get("hwmodel"), 40)
+            firmware = clamp_str(_firmware_from_node(node), 80)
 
             hops_away = _to_int_or_none(node.get("hopsAway")) if isinstance(node, dict) else None
+            if hops_away is None and isinstance(node, dict):
+                hops_away = _to_int_or_none(node.get("hops_away"))
 
             last_heard = node.get("lastHeard") if isinstance(node, dict) else None
+            if last_heard is None and isinstance(node, dict):
+                last_heard = node.get("last_heard")
             if isinstance(last_heard, (int, float)) and last_heard > 0:
                 last_heard_int: Optional[int] = int(last_heard)
             else:
                 last_heard_int = None
 
             snr = _to_float_or_none(node.get("snr") if isinstance(node, dict) else None)
-            entries.append((node_id_str, short, long, hops_away, last_heard_int, snr))
+            entries.append(
+                (
+                    node_id_str,
+                    short,
+                    long,
+                    role,
+                    hw_model,
+                    firmware,
+                    hops_away,
+                    last_heard_int,
+                    snr,
+                )
+            )
 
         if not entries:
             return
@@ -172,6 +208,9 @@ class StatsDB:
                 SET
                   short = COALESCE(?, short),
                   long = COALESCE(?, long),
+                  role = COALESCE(?, role),
+                  hw_model = COALESCE(?, hw_model),
+                  firmware = COALESCE(?, firmware),
                   hops_away = COALESCE(?, hops_away),
                   last_heard = COALESCE(?, last_heard),
                   last_snr = COALESCE(last_snr, ?),
@@ -182,13 +221,26 @@ class StatsDB:
                     (
                         short,
                         long,
+                        role,
+                        hw_model,
+                        firmware,
                         hops_away,
                         last_heard,
                         snr,
                         last_heard,
                         node_id,
                     )
-                    for (node_id, short, long, hops_away, last_heard, snr) in entries
+                    for (
+                        node_id,
+                        short,
+                        long,
+                        role,
+                        hw_model,
+                        firmware,
+                        hops_away,
+                        last_heard,
+                        snr,
+                    ) in entries
                 ],
             )
 
@@ -201,6 +253,9 @@ class StatsDB:
                   node_id,
                   short,
                   long,
+                  role,
+                  hw_model,
+                  firmware,
                   hops_away,
                   last_heard,
                   last_rx,
@@ -220,13 +275,17 @@ class StatsDB:
                 age = max(0, now - int(last))
 
             snr = r["last_snr"]
+            hops_away = r["hops_away"]
             out.append(
                 {
                     "id": str(r["node_id"]),
                     "short": r["short"],
                     "long": r["long"],
+                    "role": r["role"],
+                    "hwModel": r["hw_model"],
+                    "firmware": r["firmware"],
                     "snr": snr,
-                    "hopsAway": r["hops_away"],
+                    "hopsAway": hops_away,
                     "lastHeard": last,
                     "ageSec": age,
                     "quality": quality_bucket(snr),
@@ -235,8 +294,73 @@ class StatsDB:
 
         return out
 
+    def get_node_stats(self, node_id: str) -> Optional[Dict[str, Any]]:
+        node_id = str(node_id or "").strip()
+        if not node_id:
+            return None
+
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                  node_id,
+                  short,
+                  long,
+                  role,
+                  hw_model,
+                  firmware,
+                  hops_away,
+                  last_heard,
+                  last_rx,
+                  last_snr,
+                  last_rssi,
+                  from_count,
+                  to_count
+                FROM node_counts
+                WHERE node_id = ?
+                """,
+                (node_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        now = now_epoch()
+        last = row["last_heard"] if row["last_heard"] is not None else row["last_rx"]
+        age = None
+        if isinstance(last, (int, float)) and last > 0:
+            age = max(0, now - int(last))
+
+        snr = row["last_snr"]
+        hops_away = row["hops_away"]
+
+        return {
+            "id": str(row["node_id"]),
+            "short": row["short"],
+            "long": row["long"],
+            "role": row["role"],
+            "hwModel": row["hw_model"],
+            "firmware": row["firmware"],
+            "snr": snr,
+            "rssi": row["last_rssi"],
+            "hopsAway": hops_away,
+            "lastHeard": row["last_heard"],
+            "lastRx": row["last_rx"],
+            "ageSec": age,
+            "quality": quality_bucket(snr),
+            "fromCount": int(row["from_count"]),
+            "toCount": int(row["to_count"]),
+        }
+
     # ---- readers
-    def summary(self, *, hours: int = 24, top_limit: int = 8, event_limit: int = 12) -> StatsSummary:
+    def summary(
+        self,
+        *,
+        hours: int = 24,
+        top_limit: int = 8,
+        event_limit: int = 12,
+        local_node_id: Optional[str] = None,
+    ) -> StatsSummary:
         hours = max(1, int(hours))
         top_limit = max(1, int(top_limit))
         event_limit = max(1, int(event_limit))
@@ -252,6 +376,8 @@ class StatsDB:
             top_from = self._get_top(kind="from", limit=top_limit)
             top_to = self._get_top(kind="to", limit=top_limit)
             events = self._get_events(limit=event_limit)
+            app_counts = self._get_app_counts()
+            app_requests_to_me = self._get_app_requests_to_me(local_node_id)
 
         return StatsSummary(
             db_path=self.path,
@@ -264,6 +390,8 @@ class StatsDB:
             top_from=top_from,
             top_to=top_to,
             recent_events=events,
+            app_counts=app_counts,
+            app_requests_to_me=app_requests_to_me,
         )
 
     # ---- internals
@@ -325,6 +453,27 @@ class StatsDB:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_counts (
+                  app TEXT PRIMARY KEY,
+                  total INTEGER NOT NULL,
+                  requests INTEGER NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_requests (
+                  app TEXT NOT NULL,
+                  from_id TEXT NOT NULL,
+                  to_id TEXT NOT NULL,
+                  count INTEGER NOT NULL,
+                  last_ts INTEGER NOT NULL,
+                  PRIMARY KEY(app, from_id, to_id)
+                )
+                """
+            )
 
     def _ensure_node_counts_columns(self) -> None:
         existing = {
@@ -335,6 +484,9 @@ class StatsDB:
         wanted: Dict[str, str] = {
             "short": "TEXT",
             "long": "TEXT",
+            "role": "TEXT",
+            "hw_model": "TEXT",
+            "firmware": "TEXT",
             "hops_away": "INTEGER",
             "last_heard": "INTEGER",
         }
@@ -370,6 +522,64 @@ class StatsDB:
         self._conn.execute(
             "INSERT INTO events(ts, event, detail) VALUES(?, ?, ?)",
             (now_epoch(), event, detail),
+        )
+
+    def _record_app_appearance(self, msg: Dict[str, Any]) -> None:
+        app = _app_name_from_message(msg)
+        if not app:
+            return
+        has_request_id = msg.get("requestId") is not None
+        wants_response = msg.get("wantResponse") is True
+        is_request = has_request_id or wants_response
+
+        self._conn.execute(
+            "INSERT OR IGNORE INTO app_counts(app, total, requests) VALUES(?, 0, 0)",
+            (app,),
+        )
+        self._conn.execute(
+            """
+            UPDATE app_counts
+            SET
+              total = total + 1,
+              requests = requests + ?
+            WHERE app = ?
+            """,
+            (1 if is_request else 0, app),
+        )
+
+    def _record_app_request(self, msg: Dict[str, Any]) -> None:
+        app = _app_name_from_message(msg)
+        if not app:
+            return
+        has_request_id = msg.get("requestId") is not None
+        wants_response = msg.get("wantResponse") is True
+        if not (has_request_id or wants_response):
+            return
+
+        from_id = msg.get("fromId")
+        if not isinstance(from_id, str) or not from_id:
+            return
+
+        to_id = msg.get("toId")
+        to_id_norm = str(to_id).strip() if isinstance(to_id, str) and to_id else "^all"
+
+        ts = msg.get("rxTime")
+        if not isinstance(ts, (int, float)) or ts <= 0:
+            ts = now_epoch()
+
+        self._conn.execute(
+            "INSERT OR IGNORE INTO app_requests(app, from_id, to_id, count, last_ts) VALUES(?, ?, ?, 0, ?)",
+            (app, from_id, to_id_norm, int(ts)),
+        )
+        self._conn.execute(
+            """
+            UPDATE app_requests
+            SET
+              count = count + 1,
+              last_ts = ?
+            WHERE app = ? AND from_id = ? AND to_id = ?
+            """,
+            (int(ts), app, from_id, to_id_norm),
         )
 
     def _get_counters(self) -> Dict[str, int]:
@@ -436,6 +646,52 @@ class StatsDB:
         rows = list(reversed(rows))
         return [{"ts": int(r["ts"]), "event": str(r["event"]), "detail": r["detail"]} for r in rows]
 
+    def _get_app_counts(self) -> List[Dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT app, total, requests FROM app_counts ORDER BY total DESC"
+        ).fetchall()
+        return [
+            {
+                "app": str(r["app"]),
+                "total": int(r["total"]),
+                "requests": int(r["requests"]),
+            }
+            for r in rows
+        ]
+
+    def _get_app_requests_to_me(self, local_node_id: Optional[str]) -> List[Dict[str, Any]]:
+        params: List[Any] = []
+        where = "to_id = '^all'"
+        if isinstance(local_node_id, str) and local_node_id.strip():
+            where = "to_id IN (?, '^all')"
+            params.append(local_node_id.strip())
+
+        rows = self._conn.execute(
+            f"""
+            SELECT app, from_id, to_id, count, last_ts
+            FROM app_requests
+            WHERE {where}
+            ORDER BY count DESC, last_ts DESC
+            """,
+            tuple(params),
+        ).fetchall()
+
+        out = []
+        for r in rows:
+            from_id = str(r["from_id"])
+            if isinstance(local_node_id, str) and local_node_id.strip() and from_id == local_node_id:
+                continue
+            out.append(
+                {
+                    "app": str(r["app"]),
+                    "fromId": from_id,
+                    "toId": str(r["to_id"]),
+                    "count": int(r["count"]),
+                    "lastTs": int(r["last_ts"]),
+                }
+            )
+        return out
+
 
 def _to_float_or_none(value: Any) -> Optional[float]:
     if value is None:
@@ -453,3 +709,78 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return int(value)
     except Exception:
         return None
+
+
+def _role_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def _firmware_from_node(node: Any) -> Optional[str]:
+    if not isinstance(node, dict):
+        return None
+    paths = [
+        "firmwareVersion",
+        "firmware_version",
+        "firmware",
+        "user.firmwareVersion",
+        "user.firmware_version",
+        "user.firmware",
+        "metadata.firmwareVersion",
+        "metadata.firmware_version",
+        "deviceMetadata.firmwareVersion",
+        "deviceMetadata.firmware_version",
+        "device_metadata.firmwareVersion",
+        "device_metadata.firmware_version",
+    ]
+    for path in paths:
+        cur = node
+        ok = True
+        for part in path.split("."):
+            if not isinstance(cur, dict):
+                ok = False
+                break
+            cur = cur.get(part)
+        if ok:
+            normalized = _normalize_firmware_value(cur)
+            if normalized:
+                return normalized
+    return None
+
+
+def _normalize_firmware_value(val: Any) -> Optional[str]:
+    if val is None:
+        return None
+    if isinstance(val, str):
+        out = val.strip()
+        return out or None
+    return None
+
+
+def _app_name_from_message(msg: Dict[str, Any]) -> Optional[str]:
+    app = msg.get("app")
+    if isinstance(app, str) and app:
+        return app
+    portnum = msg.get("portnum")
+    try:
+        val = int(portnum)
+    except Exception:
+        return None
+    if val == 3:
+        return "POSITION_APP"
+    if val == 4:
+        return "NODEINFO_APP"
+    if val == 5:
+        return "ROUTING_APP"
+    if val == 0x43:
+        return "TELEMETRY_APP"
+    return None

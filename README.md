@@ -2,6 +2,20 @@
 
 A small, clean monitoring UI + JSON API for a Meshtastic network reachable over **TCP** (direct to node, default `4403`) or optionally via **MQTT** (broker).
 
+## Start in 2 minutes (the simple way)
+
+```bash
+chmod +x run.sh
+./run.sh --host YOUR_MESH_IP
+```
+
+Then open:
+
+- UI: `http://localhost:8080/`
+- API health: `http://localhost:8080/api/health`
+
+That’s it. You can also configure the IP/port later in **Settings** inside the UI.
+
 ## Features
 
 - **Backend (data layer)**: Python + Flask + `meshtastic` TCP/MQTT client, robust reconnect, JSON-safe endpoints
@@ -98,7 +112,7 @@ Then open:
   - `STATS_WINDOW_HOURS` (default `24`) used by `/api/stats`
 - Optional runtime update (used by the UI Settings modal):
   - `POST /api/config` (partial updates allowed), e.g. `{ "transport":"tcp", "meshHost":"...", "meshPort":4403 }` or `{ "transport":"mqtt", "mqttHost":"...", "mqttPort":1883 }`
-  - Settings modal also supports **Export Config** (downloads a JSON snapshot; MQTT password is never included)
+  - Settings modal also supports **Export Config** (downloads a JSON snapshot including device config; MQTT password is never included)
 
 ## API
 
@@ -132,20 +146,35 @@ Returns a list of thin messages (max 200). **Ordering: newest last (chronologica
 
 Returns configured channels (if available from the active transport/interface). Secrets/PSKs are never included.
 
+### `GET /api/radio`
+
+Returns a JSON-safe snapshot of **your local radio** (id, names, hops, metrics, position when available).
+
+### `GET /api/device/config`
+
+Returns the full device configuration (local + module config, channels, metadata, myInfo).
+Use `?includeSecrets=1` to include channel PSKs; default redacts PSKs.
+
 ### `GET /api/stats`
 
 Returns persisted counters and simple aggregates (SQLite at `STATS_DB_PATH`), including:
 
 - message totals + per-hour buckets (`messages.windowHours`, `messages.hourlyWindow`)
+- app appearance counts (`apps.counts`) for Position/NodeInfo/Telemetry/Routing
+- requesters targeting you or broadcast (`apps.requestsToMe`)
 - top talkers (`nodes.topFrom`, `nodes.topTo`)
 - recent mesh/connectivity events (`events`)
+
+### `GET /api/node/<id>`
+
+Returns a combined view of live node data + persisted stats for a single node.
 
 ### `POST /api/send`
 
 Body:
 
 ```json
-{ "text": "hello", "to": "!abcd1234" }
+{ "text": "hello", "to": "!abcd1234", "channel": 0 }
 ```
 
 ## Curl examples

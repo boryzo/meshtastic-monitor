@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from flask import Flask, Response, jsonify, request
 
-from backend.jsonsafe import node_entry, now_epoch
+from backend.jsonsafe import node_entry, now_epoch, radio_entry
 from backend.mesh_service import MeshService
 from backend.stats_db import StatsDB
 
@@ -226,13 +226,118 @@ def create_app(
             }
         )
 
+    @app.get("/api/radio")
+    def api_radio():
+        node = None
+        getter = getattr(mesh_service, "get_radio_snapshot", None)
+        if callable(getter):
+            try:
+                node = getter()
+            except Exception:
+                node = None
+
+        cfg = mesh_service.get_config()
+        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
+
+        return jsonify(
+            {
+                "ok": True,
+                "configured": configured,
+                "connected": bool(mesh_service.is_connected()),
+                "node": radio_entry(node) if isinstance(node, dict) else None,
+                "generatedAt": now_epoch(),
+            }
+        )
+
+    @app.get("/api/device/config")
+    def api_device_config():
+        include_raw = request.args.get("includeSecrets", "0")
+        include_secrets = str(include_raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+        cfg = mesh_service.get_config()
+        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
+
+        getter = getattr(mesh_service, "get_device_config", None)
+        device = None
+        if callable(getter):
+            try:
+                device = getter(include_secrets=include_secrets)
+            except Exception:
+                device = None
+
+        if device is None:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "device config not available",
+                        "configured": configured,
+                        "connected": bool(mesh_service.is_connected()),
+                        "secretsIncluded": include_secrets,
+                        "generatedAt": now_epoch(),
+                    }
+                ),
+                503,
+            )
+
+        return jsonify(
+            {
+                "ok": True,
+                "configured": configured,
+                "connected": bool(mesh_service.is_connected()),
+                "secretsIncluded": include_secrets,
+                "device": device,
+                "generatedAt": now_epoch(),
+            }
+        )
+
+    @app.get("/api/node/<path:node_id>")
+    def api_node(node_id: str):
+        node_id = str(node_id or "").strip()
+        if not node_id:
+            return jsonify({"ok": False, "error": "node id required"}), 400
+
+        node = None
+        try:
+            nodes = mesh_service.get_nodes_snapshot()
+            node = nodes.get(node_id)
+        except Exception:
+            node = None
+
+        stats = None
+        if stats_db is not None:
+            try:
+                stats = stats_db.get_node_stats(node_id)
+            except Exception:
+                stats = None
+
+        if node is None and stats is None:
+            return jsonify({"ok": False, "error": "node not found"}), 404
+
+        return jsonify(
+            {
+                "ok": True,
+                "node": node_entry(node_id, node) if isinstance(node, dict) else None,
+                "stats": stats,
+                "generatedAt": now_epoch(),
+            }
+        )
+
     @app.get("/api/stats")
     def api_stats():
         if stats_db is None:
             return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()})
 
         hours = _get_env_int("STATS_WINDOW_HOURS", 24)
-        summary = stats_db.summary(hours=hours)
+        local_id = None
+        getter = getattr(mesh_service, "get_radio_snapshot", None)
+        if callable(getter):
+            try:
+                local_id = _local_node_id(getter())
+            except Exception:
+                local_id = None
+
+        summary = stats_db.summary(hours=hours, local_node_id=local_id)
         cfg = mesh_service.get_config()
         configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
 
@@ -256,6 +361,10 @@ def create_app(
                     "window": summary.messages_window,
                     "hourlyWindow": summary.hourly_window,
                 },
+                "apps": {
+                    "counts": summary.app_counts,
+                    "requestsToMe": summary.app_requests_to_me,
+                },
                 "nodes": {
                     "topFrom": summary.top_from,
                     "topTo": summary.top_to,
@@ -269,6 +378,7 @@ def create_app(
         body = request.get_json(silent=True) or {}
         text = body.get("text")
         to = body.get("to")
+        channel = body.get("channel")
 
         if not isinstance(text, str) or not text.strip():
             return jsonify({"ok": False, "error": "text is required"}), 400
@@ -277,8 +387,17 @@ def create_app(
         if isinstance(to, str) and to.strip():
             to_clean = to.strip()
 
+        channel_clean: Optional[int] = None
+        if channel is not None:
+            try:
+                channel_clean = int(channel)
+            except Exception:
+                return jsonify({"ok": False, "error": "channel must be an int"}), 400
+            if channel_clean < 0:
+                return jsonify({"ok": False, "error": "channel must be >= 0"}), 400
+
         try:
-            mesh_service.send_text(text.strip(), to_clean)
+            mesh_service.send_text(text.strip(), to_clean, channel=channel_clean)
             if stats_db is not None:
                 stats_db.record_send(ok=True)
             return jsonify({"ok": True})
@@ -365,6 +484,26 @@ def create_app(
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 400
 
     return app
+
+
+def _local_node_id(node: Any) -> Optional[str]:
+    if not isinstance(node, dict):
+        return None
+    user = node.get("user")
+    if isinstance(user, dict):
+        val = user.get("id")
+        if isinstance(val, str) and val:
+            return val
+    val = node.get("id")
+    if isinstance(val, str) and val:
+        return val
+    num = node.get("num") or node.get("nodeNum")
+    if isinstance(num, (int, float)) and num >= 0:
+        try:
+            return f"!{int(num):08x}"
+        except Exception:
+            return None
+    return None
 
 
 def main() -> None:
