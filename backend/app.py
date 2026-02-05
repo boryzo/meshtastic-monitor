@@ -28,6 +28,22 @@ def _get_env_bool(name: str, default: bool) -> bool:
     if raw is None or raw == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+def _base_status_payload(cfg: Any, configured: bool, mesh_service: Any) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "transport": cfg.transport,
+        "configured": configured,
+        "meshHost": (cfg.mesh_host or None),
+        "meshPort": cfg.mesh_port,
+        "mqttHost": cfg.mqtt_host,
+        "mqttPort": cfg.mqtt_port,
+        "mqttUsername": cfg.mqtt_username,
+        "mqttTls": bool(cfg.mqtt_tls),
+        "mqttRootTopic": cfg.mqtt_root_topic,
+        "mqttPasswordSet": bool(cfg.mqtt_password),
+        "connected": bool(mesh_service.is_connected()),
+        "lastError": mesh_service.last_error(),
+    }
 def _is_configured(cfg: Any) -> bool:
     return bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
 def _split_nodes(
@@ -125,24 +141,9 @@ def create_app(
     def api_health():
         cfg = mesh_service.get_config()
         configured = _is_configured(cfg)
-        return jsonify(
-            {
-                "ok": True,
-                "transport": cfg.transport,
-                "configured": configured,
-                "meshHost": (cfg.mesh_host or None),
-                "meshPort": cfg.mesh_port,
-                "mqttHost": cfg.mqtt_host,
-                "mqttPort": cfg.mqtt_port,
-                "mqttUsername": cfg.mqtt_username,
-                "mqttTls": bool(cfg.mqtt_tls),
-                "mqttRootTopic": cfg.mqtt_root_topic,
-                "mqttPasswordSet": bool(cfg.mqtt_password),
-                "connected": bool(mesh_service.is_connected()),
-                "lastError": mesh_service.last_error(),
-                "generatedAt": now_epoch(),
-            }
-        )
+        payload = _base_status_payload(cfg, configured, mesh_service)
+        payload["generatedAt"] = now_epoch()
+        return jsonify(payload)
     @app.get("/api/status")
     def api_status():
         cfg = mesh_service.get_config()
@@ -160,30 +161,19 @@ def create_app(
         report_error = status.get("error") if isinstance(status, dict) else None
         report_fetched_at = status.get("fetchedAt") if isinstance(status, dict) else None
         report_url = status.get("url") if isinstance(status, dict) else None
-        return jsonify(
+        payload = _base_status_payload(cfg, configured, mesh_service)
+        payload.update(
             {
-                "ok": True,
-                "transport": cfg.transport,
-                "configured": configured,
-                "meshHost": (cfg.mesh_host or None),
-                "meshPort": cfg.mesh_port,
-                "mqttHost": cfg.mqtt_host,
-                "mqttPort": cfg.mqtt_port,
-                "mqttUsername": cfg.mqtt_username,
-                "mqttTls": bool(cfg.mqtt_tls),
-                "mqttRootTopic": cfg.mqtt_root_topic,
-                "mqttPasswordSet": bool(cfg.mqtt_password),
-                "connected": bool(mesh_service.is_connected()),
-                "lastError": mesh_service.last_error(),
                 "reportOk": report_ok,
                 "reportStatus": report_status,
                 "report": report,
                 "reportError": report_error,
                 "reportFetchedAt": report_fetched_at,
                 "reportUrl": report_url,
-                "generatedAt": now_epoch(),
             }
         )
+        payload["generatedAt"] = now_epoch()
+        return jsonify(payload)
     @app.get("/api/nodes")
     def api_nodes():
         include_observed_raw = request.args.get("includeObserved", "1")

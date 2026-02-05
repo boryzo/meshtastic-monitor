@@ -13,6 +13,8 @@ from backend.jsonsafe import (
     now_epoch,
     portnum_name,
     quality_bucket,
+    _float_or_none as _to_float_or_none,
+    _int_or_none as _to_int_or_none,
 )
 
 
@@ -1113,24 +1115,6 @@ class StatsDB:
                 }
             )
         return out
-
-
-def _to_float_or_none(value: Any) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _to_int_or_none(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except Exception:
-        return None
 
 
 def _to_str_or_none(value: Any) -> Optional[str]:
