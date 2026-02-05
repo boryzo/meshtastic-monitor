@@ -6,7 +6,14 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from backend.jsonsafe import clamp_str, now_epoch, quality_bucket
+from backend.jsonsafe import (
+    clamp_str,
+    firmware_from_node,
+    node_user_fields,
+    now_epoch,
+    portnum_name,
+    quality_bucket,
+)
 
 
 @dataclass(frozen=True)
@@ -231,12 +238,12 @@ class StatsDB:
             node_id_str = str(node_id)
             if not node_id_str:
                 continue
-            user = (node.get("user") or {}) if isinstance(node, dict) else {}
-            short = clamp_str(user.get("shortName") or user.get("short_name"), 40)
-            long = clamp_str(user.get("longName") or user.get("long_name"), 80)
-            role = clamp_str(_role_str(user.get("role")), 40) if isinstance(user, dict) else None
-            hw_model = clamp_str(user.get("hwModel") or user.get("hw_model") or user.get("hwmodel"), 40)
-            firmware = clamp_str(_firmware_from_node(node), 80)
+            fields = node_user_fields(node)
+            short = fields["short"]
+            long = fields["long"]
+            role = fields["role"]
+            hw_model = fields["hwModel"]
+            firmware = clamp_str(firmware_from_node(node), 80)
 
             hops_away = _to_int_or_none(node.get("hopsAway")) if isinstance(node, dict) else None
             if hops_away is None and isinstance(node, dict):
@@ -927,52 +934,6 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
 
 
-def _role_str(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    name = getattr(value, "name", None)
-    if isinstance(name, str) and name:
-        return name
-    try:
-        return str(value)
-    except Exception:
-        return None
-
-
-def _firmware_from_node(node: Any) -> Optional[str]:
-    if not isinstance(node, dict):
-        return None
-    paths = [
-        "firmwareVersion",
-        "firmware_version",
-        "firmware",
-        "user.firmwareVersion",
-        "user.firmware_version",
-        "user.firmware",
-        "metadata.firmwareVersion",
-        "metadata.firmware_version",
-        "deviceMetadata.firmwareVersion",
-        "deviceMetadata.firmware_version",
-        "device_metadata.firmwareVersion",
-        "device_metadata.firmware_version",
-    ]
-    for path in paths:
-        cur = node
-        ok = True
-        for part in path.split("."):
-            if not isinstance(cur, dict):
-                ok = False
-                break
-            cur = cur.get(part)
-        if ok:
-            normalized = _normalize_firmware_value(cur)
-            if normalized:
-                return normalized
-    return None
-
-
 def _to_str_or_none(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -1014,30 +975,8 @@ def _bool_from_int(value: Any) -> Optional[bool]:
         return None
 
 
-def _normalize_firmware_value(val: Any) -> Optional[str]:
-    if val is None:
-        return None
-    if isinstance(val, str):
-        out = val.strip()
-        return out or None
-    return None
-
-
 def _app_name_from_message(msg: Dict[str, Any]) -> Optional[str]:
     app = msg.get("app")
     if isinstance(app, str) and app:
         return app
-    portnum = msg.get("portnum")
-    try:
-        val = int(portnum)
-    except Exception:
-        return None
-    if val == 3:
-        return "POSITION_APP"
-    if val == 4:
-        return "NODEINFO_APP"
-    if val == 5:
-        return "ROUTING_APP"
-    if val == 0x43:
-        return "TELEMETRY_APP"
-    return None
+    return portnum_name(msg.get("portnum"))

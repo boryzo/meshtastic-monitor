@@ -11,18 +11,10 @@ Meshtastic Monitor runner
 Usage:
   ./run.sh [MESH_HOST]
   ./run.sh --host your-mesh-host --mesh-port 4403 --http-port 8080
-  ./run.sh --transport mqtt --mqtt-host broker.example --mqtt-port 1883
 
 Options:
-  --transport           Connection type: tcp|mqtt (default: tcp)
   --host, --mesh-host   Meshtastic host/IP (required for TCP unless configured in UI)
   --mesh-port           Meshtastic TCP port (default: 4403)
-  --mqtt-host           MQTT broker host (default: mqtt.meshtastic.org)
-  --mqtt-port           MQTT broker port (default: 1883)
-  --mqtt-username       MQTT username
-  --mqtt-password       MQTT password
-  --mqtt-tls            Use TLS for MQTT (sets MQTT_TLS=1)
-  --mqtt-root-topic     MQTT root topic (optional)
   --http-port           HTTP port for the web app (default: 8080)
   --nodes-history-interval  Node history sample interval in seconds (default: 60)
   --no-install          Skip pip install step
@@ -32,16 +24,9 @@ Options:
 EOF
 }
 
-MESH_TRANSPORT="${MESH_TRANSPORT:-tcp}"
 MESH_HOST="${MESH_HOST:-}"
 MESH_PORT="${MESH_PORT:-4403}"
 HTTP_PORT="${HTTP_PORT:-8080}"
-MQTT_HOST="${MQTT_HOST:-mqtt.meshtastic.org}"
-MQTT_PORT="${MQTT_PORT:-1883}"
-MQTT_USERNAME="${MQTT_USERNAME:-}"
-MQTT_PASSWORD="${MQTT_PASSWORD:-}"
-MQTT_TLS="${MQTT_TLS:-0}"
-MQTT_ROOT_TOPIC="${MQTT_ROOT_TOPIC:-}"
 NODES_HISTORY_INTERVAL_SEC="${NODES_HISTORY_INTERVAL_SEC:-60}"
 DO_INSTALL=1
 DO_CHECK=1
@@ -53,40 +38,12 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    --transport)
-      MESH_TRANSPORT="${2:-}"
-      shift 2
-      ;;
     --host|--mesh-host)
       MESH_HOST="${2:-}"
       shift 2
       ;;
     --mesh-port)
       MESH_PORT="${2:-}"
-      shift 2
-      ;;
-    --mqtt-host)
-      MQTT_HOST="${2:-}"
-      shift 2
-      ;;
-    --mqtt-port)
-      MQTT_PORT="${2:-}"
-      shift 2
-      ;;
-    --mqtt-username)
-      MQTT_USERNAME="${2:-}"
-      shift 2
-      ;;
-    --mqtt-password)
-      MQTT_PASSWORD="${2:-}"
-      shift 2
-      ;;
-    --mqtt-tls)
-      MQTT_TLS="1"
-      shift
-      ;;
-    --mqtt-root-topic)
-      MQTT_ROOT_TOPIC="${2:-}"
       shift 2
       ;;
     --http-port)
@@ -122,26 +79,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-MESH_TRANSPORT="$(echo "$MESH_TRANSPORT" | tr '[:upper:]' '[:lower:]' | xargs)"
-if [[ "$MESH_TRANSPORT" != "tcp" && "$MESH_TRANSPORT" != "mqtt" ]]; then
-  echo "Invalid --transport: $MESH_TRANSPORT (expected tcp|mqtt)" >&2
-  exit 2
-fi
-
 if ! [[ "$MESH_PORT" =~ ^[0-9]+$ ]]; then
   echo "Invalid --mesh-port: $MESH_PORT" >&2
   exit 2
 fi
 if ! [[ "$HTTP_PORT" =~ ^[0-9]+$ ]]; then
   echo "Invalid --http-port: $HTTP_PORT" >&2
-  exit 2
-fi
-if ! [[ "$MQTT_PORT" =~ ^[0-9]+$ ]]; then
-  echo "Invalid --mqtt-port: $MQTT_PORT" >&2
-  exit 2
-fi
-if [[ "$MESH_TRANSPORT" == "mqtt" && -z "$(echo "$MQTT_HOST" | xargs)" ]]; then
-  echo "MQTT transport requires --mqtt-host (or MQTT_HOST env var)" >&2
   exit 2
 fi
 
@@ -165,33 +108,20 @@ fi
 
 export MESH_HOST="$MESH_HOST"
 export MESH_PORT="$MESH_PORT"
-export MESH_TRANSPORT="$MESH_TRANSPORT"
 export HTTP_PORT="$HTTP_PORT"
-export MQTT_HOST="$MQTT_HOST"
-export MQTT_PORT="$MQTT_PORT"
-export MQTT_USERNAME="$MQTT_USERNAME"
-export MQTT_PASSWORD="$MQTT_PASSWORD"
-export MQTT_TLS="$MQTT_TLS"
-export MQTT_ROOT_TOPIC="$MQTT_ROOT_TOPIC"
 export NODES_HISTORY_INTERVAL_SEC="$NODES_HISTORY_INTERVAL_SEC"
 
 if [[ "$DO_CHECK" -eq 1 ]]; then
-  if [[ "$MESH_TRANSPORT" == "mqtt" ]]; then
-    CHECK_HOST="$MQTT_HOST"
-    CHECK_PORT="$MQTT_PORT"
-    CHECK_LABEL="MQTT broker"
+  if [[ -z "$(echo "$MESH_HOST" | xargs)" ]]; then
+    echo "Note: no Meshtastic host provided; skipping TCP reachability check."
+    echo "Tip: open http://localhost:${HTTP_PORT}/ and set host/port in Settings."
+    CHECK_HOST=""
+    CHECK_PORT=""
+    CHECK_LABEL=""
   else
-    if [[ -z "$(echo "$MESH_HOST" | xargs)" ]]; then
-      echo "Note: no Meshtastic host provided; skipping TCP reachability check."
-      echo "Tip: open http://localhost:${HTTP_PORT}/ and set host/port in Settings."
-      CHECK_HOST=""
-      CHECK_PORT=""
-      CHECK_LABEL=""
-    else
-      CHECK_HOST="$MESH_HOST"
-      CHECK_PORT="$MESH_PORT"
-      CHECK_LABEL="Meshtastic TCP"
-    fi
+    CHECK_HOST="$MESH_HOST"
+    CHECK_PORT="$MESH_PORT"
+    CHECK_LABEL="Meshtastic TCP"
   fi
 
   if [[ -n "$CHECK_HOST" && -n "$CHECK_PORT" ]]; then

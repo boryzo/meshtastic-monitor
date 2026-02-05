@@ -1,14 +1,9 @@
 from __future__ import annotations
-
 import base64
 import time
 from typing import Any, Dict, Optional
-
-
 def now_epoch() -> int:
     return int(time.time())
-
-
 def clamp_str(value: Any, max_len: int = 400) -> Optional[str]:
     if value is None:
         return None
@@ -19,12 +14,8 @@ def clamp_str(value: Any, max_len: int = 400) -> Optional[str]:
     if len(out) > max_len:
         return out[:max_len] + "…"
     return out
-
-
 def b64_encode(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
-
-
 def quality_bucket(snr: Any) -> Optional[str]:
     if snr is None:
         return None
@@ -32,7 +23,6 @@ def quality_bucket(snr: Any) -> Optional[str]:
         s = float(snr)
     except Exception:
         return None
-
     if s >= 0:
         return "good"
     if s >= -7:
@@ -40,53 +30,35 @@ def quality_bucket(snr: Any) -> Optional[str]:
     if s >= -12:
         return "weak"
     return "bad"
-
-
+def _first_value(obj: Any, *keys: str) -> Any:
+    if not isinstance(obj, dict):
+        return None
+    for key in keys:
+        if key in obj:
+            val = obj.get(key)
+            if val is not None:
+                return val
+    return None
 def json_safe_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convert a Meshtastic 'packet' dict into a small, JSON-serializable model.
     Ensures there are no bytes objects in the result.
     """
     decoded = packet.get("decoded") or {}
-
     portnum = decoded.get("portnum")
     text = decoded.get("text")
-
     payload = decoded.get("payload")
     payload_b64 = (
         b64_encode(payload) if isinstance(payload, (bytes, bytearray)) else None
     )
-
-    snr = packet.get("snr")
-    if snr is None:
-        snr = packet.get("rxSnr")
-
-    rssi = packet.get("rssi")
-    if rssi is None:
-        rssi = packet.get("rxRssi")
-
-    request_id = decoded.get("requestId")
-    if request_id is None:
-        request_id = decoded.get("request_id")
-
-    want_response = decoded.get("wantResponse")
-    if want_response is None:
-        want_response = decoded.get("want_response")
-
-    channel = packet.get("channel")
+    snr = _first_value(packet, "snr", "rxSnr")
+    rssi = _first_value(packet, "rssi", "rxRssi")
+    request_id = _first_value(decoded, "requestId", "request_id")
+    want_response = _first_value(decoded, "wantResponse", "want_response")
+    channel = _first_value(packet, "channel", "channelIndex", "channel_index")
     if channel is None:
-        channel = packet.get("channelIndex")
-    if channel is None:
-        channel = packet.get("channel_index")
-    if channel is None:
-        channel = decoded.get("channel")
-    if channel is None:
-        channel = decoded.get("channelIndex")
-    if channel is None:
-        channel = decoded.get("channel_index")
-
-    app = _portnum_name(portnum)
-
+        channel = _first_value(decoded, "channel", "channelIndex", "channel_index")
+    app = portnum_name(portnum)
     msg: Dict[str, Any] = {
         "rxTime": packet.get("rxTime"),
         "fromId": packet.get("fromId"),
@@ -102,74 +74,49 @@ def json_safe_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
         "text": clamp_str(text, 1000),
         "payload_b64": payload_b64,
     }
-
     # Avoid accidentally passing through bytes under different keys
     for key, value in list(msg.items()):
         if isinstance(value, (bytes, bytearray)):
             msg[key] = b64_encode(value)
-
     return msg
-
-
 def node_entry(node_id: str, node: Dict[str, Any]) -> Dict[str, Any]:
-    user = node.get("user") or {}
-    last_heard = node.get("lastHeard")
-    if last_heard is None:
-        last_heard = node.get("last_heard")
-
-    snr = node.get("snr")
-    if snr is None:
-        snr = node.get("rxSnr")
-
-    hops_away = _int_or_none(node.get("hopsAway"))
-    if hops_away is None:
-        hops_away = _int_or_none(node.get("hops_away"))
-
+    if not isinstance(node, dict):
+        node = {}
+    fields = node_user_fields(node)
+    last_heard = _first_value(node, "lastHeard", "last_heard")
+    snr = _first_value(node, "snr", "rxSnr")
+    hops_away = _int_or_none(_first_value(node, "hopsAway", "hops_away"))
     age_sec = None
     if isinstance(last_heard, (int, float)) and last_heard > 0:
         age_sec = max(0, now_epoch() - int(last_heard))
-
     return {
         "id": node_id,
-        "short": clamp_str(user.get("shortName") or user.get("short_name"), 40),
-        "long": clamp_str(user.get("longName") or user.get("long_name"), 80),
-        "role": clamp_str(_role_str(user.get("role")), 40),
-        "hwModel": clamp_str(user.get("hwModel") or user.get("hw_model") or user.get("hwmodel"), 40),
-        "firmware": clamp_str(_firmware_from_node(node), 80),
+        "short": fields["short"],
+        "long": fields["long"],
+        "role": fields["role"],
+        "hwModel": fields["hwModel"],
+        "firmware": clamp_str(firmware_from_node(node), 80),
         "snr": snr,
         "hopsAway": hops_away,
         "lastHeard": last_heard,
         "ageSec": age_sec,
         "quality": quality_bucket(snr),
     }
-
-
 def radio_entry(node: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create a JSON-safe snapshot for the local (my) radio.
     """
     node_id = _node_id_from_node(node)
     base = node_entry(node_id or "", node)
-
-    user = node.get("user") or {}
     device = node.get("deviceMetrics") or node.get("device_metrics") or {}
     position = node.get("position") or {}
-
-    def fnum(v: Any) -> Optional[float]:
-        try:
-            return float(v)
-        except Exception:
-            return None
-
-    def inum(v: Any) -> Optional[int]:
-        return _int_or_none(v)
-
+    hops_away = base.get("hopsAway")
+    if hops_away is None:
+        hops_away = 1
     return {
         **base,
-        "nodeNum": inum(node.get("num") or node.get("nodeNum")),
-        "hwModel": clamp_str(user.get("hwModel") or user.get("hw_model") or user.get("hwmodel"), 40),
-        "role": clamp_str(_role_str(user.get("role")), 40),
-        "firmware": clamp_str(_firmware_from_node(node), 80),
+        "hopsAway": hops_away,
+        "nodeNum": _int_or_none(node.get("num") or node.get("nodeNum")),
         "isFavorite": _bool_or_none(node.get("isFavorite") or node.get("is_favorite")),
         "isIgnored": _bool_or_none(node.get("isIgnored") or node.get("is_ignored")),
         "isMuted": _bool_or_none(node.get("isMuted") or node.get("is_muted")),
@@ -177,17 +124,29 @@ def radio_entry(node: Dict[str, Any]) -> Dict[str, Any]:
             node.get("isKeyManuallyVerified") or node.get("is_key_manually_verified")
         ),
         "viaMqtt": _bool_or_none(node.get("viaMqtt") or node.get("via_mqtt")),
-        "channel": inum(node.get("channel")),
-        "batteryLevel": fnum(device.get("batteryLevel") or device.get("battery_level")),
-        "voltage": fnum(device.get("voltage")),
-        "channelUtilization": fnum(
+        "channel": _int_or_none(node.get("channel")),
+        "batteryLevel": _float_or_none(device.get("batteryLevel") or device.get("battery_level")),
+        "voltage": _float_or_none(device.get("voltage")),
+        "channelUtilization": _float_or_none(
             device.get("channelUtilization") or device.get("channel_utilization")
         ),
-        "airUtilTx": fnum(device.get("airUtilTx") or device.get("air_util_tx")),
+        "airUtilTx": _float_or_none(device.get("airUtilTx") or device.get("air_util_tx")),
         "position": _position_entry(position),
     }
-
-
+def node_user_fields(node: Any) -> Dict[str, Optional[str]]:
+    if not isinstance(node, dict):
+        return {"short": None, "long": None, "role": None, "hwModel": None}
+    user = node.get("user") or {}
+    if not isinstance(user, dict):
+        user = {}
+    return {
+        "short": clamp_str(user.get("shortName") or user.get("short_name"), 40),
+        "long": clamp_str(user.get("longName") or user.get("long_name"), 80),
+        "role": clamp_str(role_str(user.get("role")), 40),
+        "hwModel": clamp_str(
+            user.get("hwModel") or user.get("hw_model") or user.get("hwmodel"), 40
+        ),
+    }
 def _int_or_none(value: Any) -> Optional[int]:
     if value is None:
         return None
@@ -195,8 +154,13 @@ def _int_or_none(value: Any) -> Optional[int]:
         return int(value)
     except Exception:
         return None
-
-
+def _float_or_none(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
 def _bool_or_none(value: Any) -> Optional[bool]:
     if isinstance(value, bool):
         return value
@@ -211,8 +175,6 @@ def _bool_or_none(value: Any) -> Optional[bool]:
         if v in {"0", "false", "no", "n", "off"}:
             return False
     return None
-
-
 def _node_id_from_node(node: Dict[str, Any]) -> Optional[str]:
     if not isinstance(node, dict):
         return None
@@ -231,32 +193,20 @@ def _node_id_from_node(node: Dict[str, Any]) -> Optional[str]:
         except Exception:
             return None
     return None
-
-
 def _position_entry(pos: Any) -> Optional[Dict[str, float]]:
     if not isinstance(pos, dict):
         return None
-
-    def fnum(v: Any) -> Optional[float]:
-        try:
-            return float(v)
-        except Exception:
-            return None
-
-    lat = fnum(pos.get("latitude"))
+    lat = _float_or_none(pos.get("latitude"))
     if lat is None and pos.get("latitudeI") is not None:
-        lat_i = fnum(pos.get("latitudeI"))
+        lat_i = _float_or_none(pos.get("latitudeI"))
         lat = lat_i * 1e-7 if lat_i is not None else None
-
-    lon = fnum(pos.get("longitude"))
+    lon = _float_or_none(pos.get("longitude"))
     if lon is None and pos.get("longitudeI") is not None:
-        lon_i = fnum(pos.get("longitudeI"))
+        lon_i = _float_or_none(pos.get("longitudeI"))
         lon = lon_i * 1e-7 if lon_i is not None else None
-    alt = fnum(pos.get("altitude"))
-
+    alt = _float_or_none(pos.get("altitude"))
     if lat is None and lon is None and alt is None:
         return None
-
     out: Dict[str, float] = {}
     if lat is not None:
         out["latitude"] = lat
@@ -265,9 +215,7 @@ def _position_entry(pos: Any) -> Optional[Dict[str, float]]:
     if alt is not None:
         out["altitude"] = alt
     return out
-
-
-def _role_str(value: Any) -> Optional[str]:
+def role_str(value: Any) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, str):
@@ -279,9 +227,7 @@ def _role_str(value: Any) -> Optional[str]:
         return str(value)
     except Exception:
         return None
-
-
-def _portnum_name(portnum: Any) -> Optional[str]:
+def portnum_name(portnum: Any) -> Optional[str]:
     if portnum is None:
         return None
     if isinstance(portnum, str):
@@ -290,7 +236,6 @@ def _portnum_name(portnum: Any) -> Optional[str]:
         val = int(portnum)
     except Exception:
         return None
-
     # Common apps we care about.
     if val == 3:
         return "POSITION_APP"
@@ -301,8 +246,6 @@ def _portnum_name(portnum: Any) -> Optional[str]:
     if val == 0x43:
         return "TELEMETRY_APP"
     return None
-
-
 def _get_path_dict(obj: Any, path: str) -> Any:
     cur = obj
     for part in path.split("."):
@@ -310,9 +253,7 @@ def _get_path_dict(obj: Any, path: str) -> Any:
             return None
         cur = cur.get(part)
     return cur
-
-
-def _firmware_from_node(node: Dict[str, Any]) -> Optional[str]:
+def firmware_from_node(node: Dict[str, Any]) -> Optional[str]:
     if not isinstance(node, dict):
         return None
     paths = [
@@ -335,8 +276,6 @@ def _firmware_from_node(node: Dict[str, Any]) -> Optional[str]:
         if normalized:
             return normalized
     return None
-
-
 def _normalize_firmware_value(val: Any) -> Optional[str]:
     if val is None:
         return None

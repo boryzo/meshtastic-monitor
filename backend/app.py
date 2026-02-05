@@ -1,49 +1,40 @@
 from __future__ import annotations
-
 if __name__ == "__main__" and __package__ is None:
     # Allow `python backend/app.py` by ensuring repo root is on sys.path *before* imports.
     import sys
     from pathlib import Path as _Path
-
     _repo_root = str(_Path(__file__).resolve().parent.parent)
     if _repo_root not in sys.path:
         sys.path.insert(0, _repo_root)
-
 import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-
 from flask import Flask, Response, jsonify, request
-
 from backend.jsonsafe import node_entry, now_epoch, radio_entry
 from backend.mesh_service import MeshService
 from backend.stats_db import StatsDB
-
-
 def _get_env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or raw == "":
+    return _parse_int(os.getenv(name), default)
+def _parse_int(value: Optional[str], default: int) -> int:
+    if value is None or value == "":
         return default
     try:
-        return int(raw)
+        return int(value)
     except Exception:
         return default
-
-
 def _get_env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or raw == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
+def _is_configured(cfg: Any) -> bool:
+    return bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
 def _split_nodes(
     nodes: Dict[str, Dict[str, Any]],
 ) -> Tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
     direct: list[Dict[str, Any]] = []
     relayed: list[Dict[str, Any]] = []
-
     for node_id, node in nodes.items():
         entry = node_entry(str(node_id), node)
         if entry.get("snr") is None:
@@ -51,18 +42,23 @@ def _split_nodes(
             relayed.append(entry)
         else:
             direct.append(entry)
-
+    _sort_nodes_by_freshness(direct)
+    _sort_nodes_by_freshness(relayed)
+    return direct, relayed
+def _sort_nodes_by_freshness(items: list[Dict[str, Any]]) -> None:
     def sort_key(item: Dict[str, Any]) -> Tuple[int, int]:
         age = item.get("ageSec")
         if age is None:
             return (1, 10**12)
         return (0, int(age))
-
-    direct.sort(key=sort_key)
-    relayed.sort(key=sort_key)
-    return direct, relayed
-
-
+    items.sort(key=sort_key)
+def _parse_history_query() -> Tuple[int, Optional[int], str]:
+    limit_raw = request.args.get("limit")
+    since_raw = request.args.get("since")
+    order = request.args.get("order", "desc")
+    limit = _parse_int(limit_raw, 500)
+    since = _parse_int(since_raw, 0) if since_raw not in {None, ""} else None
+    return limit, since, order
 def create_app(
     *,
     mesh_service: Optional[Any] = None,
@@ -73,16 +69,13 @@ def create_app(
         level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-
     root_dir = Path(__file__).resolve().parent.parent
     frontend_path = frontend_dir or (root_dir / "frontend")
-
     app = Flask(
         __name__,
         static_folder=str(frontend_path),
         static_url_path="/static",
     )
-
     # Service init
     if mesh_service is None:
         mesh_transport = os.getenv("MESH_TRANSPORT", "tcp")
@@ -94,16 +87,13 @@ def create_app(
         mqtt_password = os.getenv("MQTT_PASSWORD") or None
         mqtt_tls = _get_env_bool("MQTT_TLS", False)
         mqtt_root_topic = os.getenv("MQTT_ROOT_TOPIC") or None
-
         nodes_refresh_sec = _get_env_int("NODES_REFRESH_SEC", 5)
         max_messages = _get_env_int("MAX_MESSAGES", 200)
-
         if stats_db is None:
             stats_path = os.getenv("STATS_DB_PATH", "meshmon.db").strip()
             if stats_path.lower() not in {"", "off", "none", "disabled"}:
                 history_interval = _get_env_int("NODES_HISTORY_INTERVAL_SEC", 60)
                 stats_db = StatsDB(stats_path, nodes_history_interval_sec=history_interval)
-
         mesh_service = MeshService(
             mesh_host,
             mesh_port,
@@ -119,17 +109,15 @@ def create_app(
             stats_db=stats_db,
         )
         mesh_service.start()
-
     # --- frontend routes
     @app.get("/")
     def index() -> Response:
         return app.send_static_file("index.html")
-
     # --- API
     @app.get("/api/health")
     def api_health():
         cfg = mesh_service.get_config()
-        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
+        configured = _is_configured(cfg)
         return jsonify(
             {
                 "ok": True,
@@ -148,7 +136,6 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/nodes")
     def api_nodes():
         include_observed_raw = request.args.get("includeObserved", "1")
@@ -159,14 +146,11 @@ def create_app(
             "y",
             "on",
         }
-
         nodes = mesh_service.get_nodes_snapshot()
         direct, relayed = _split_nodes(nodes)
-
         mesh_count = len(nodes)
         observed_count = 0
         observed_added = 0
-
         if include_observed and stats_db is not None:
             known_fn = getattr(stats_db, "known_node_entries", None)
             if callable(known_fn):
@@ -174,7 +158,6 @@ def create_app(
                     known = list(known_fn())
                 except Exception:
                     known = []
-
                 observed_count = len(known)
                 existing_ids = {n.get("id") for n in direct + relayed}
                 for entry in known:
@@ -188,16 +171,8 @@ def create_app(
                         direct.append(entry)
                     existing_ids.add(node_id)
                     observed_added += 1
-
-                def sort_key(item: Dict[str, Any]) -> Tuple[int, int]:
-                    age = item.get("ageSec")
-                    if age is None:
-                        return (1, 10**12)
-                    return (0, int(age))
-
-                direct.sort(key=sort_key)
-                relayed.sort(key=sort_key)
-
+                _sort_nodes_by_freshness(direct)
+                _sort_nodes_by_freshness(relayed)
         return jsonify(
             {
                 "total": len(direct) + len(relayed),
@@ -210,33 +185,18 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/nodes/history")
     def api_nodes_history():
         if stats_db is None:
             return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()}), 503
-
-        limit_raw = request.args.get("limit", "500")
-        since_raw = request.args.get("since", "")
-        order = request.args.get("order", "desc")
         node_id = request.args.get("nodeId")
-
-        def parse_int(val: str, default: int) -> int:
-            try:
-                return int(val)
-            except Exception:
-                return default
-
-        limit = parse_int(limit_raw, 500)
-        since = parse_int(since_raw, 0) if since_raw != "" else None
-
+        limit, since, order = _parse_history_query()
         try:
             history = stats_db.list_node_history(
                 node_id=node_id, limit=limit, since=since, order=order
             )
         except Exception:
             history = []
-
         return jsonify(
             {
                 "ok": True,
@@ -245,29 +205,19 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/messages")
     def api_messages():
-        limit_raw = request.args.get("limit", "")
-        offset_raw = request.args.get("offset", "")
+        limit_raw = request.args.get("limit")
+        offset_raw = request.args.get("offset")
         order = request.args.get("order", "asc")
-
-        def parse_int(val: str, default: int) -> int:
-            try:
-                return int(val)
-            except Exception:
-                return default
-
-        limit = parse_int(limit_raw, 200) if limit_raw != "" else 200
-        offset = parse_int(offset_raw, 0) if offset_raw != "" else 0
-
+        limit = _parse_int(limit_raw, 200)
+        offset = _parse_int(offset_raw, 0)
         # Newest last (chronological) by default
         if stats_db is not None and hasattr(stats_db, "list_messages"):
             try:
                 return jsonify(stats_db.list_messages(limit=limit, offset=offset, order=order))
             except Exception:
                 pass
-
         # Fallback to in-memory messages
         msgs = mesh_service.get_messages()
         if limit > 0:
@@ -275,7 +225,6 @@ def create_app(
                 msgs = list(reversed(msgs))
             msgs = msgs[: int(limit)]
         return jsonify(msgs)
-
     @app.get("/api/channels")
     def api_channels():
         channels = mesh_service.get_channels_snapshot()
@@ -286,7 +235,6 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/radio")
     def api_radio():
         node = None
@@ -296,10 +244,8 @@ def create_app(
                 node = getter()
             except Exception:
                 node = None
-
         cfg = mesh_service.get_config()
-        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
-
+        configured = _is_configured(cfg)
         return jsonify(
             {
                 "ok": True,
@@ -309,15 +255,12 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/device/config")
     def api_device_config():
         include_raw = request.args.get("includeSecrets", "0")
         include_secrets = str(include_raw).strip().lower() in {"1", "true", "yes", "y", "on"}
-
         cfg = mesh_service.get_config()
-        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
-
+        configured = _is_configured(cfg)
         getter = getattr(mesh_service, "get_device_config", None)
         device = None
         if callable(getter):
@@ -325,7 +268,6 @@ def create_app(
                 device = getter(include_secrets=include_secrets)
             except Exception:
                 device = None
-
         if device is None:
             return (
                 jsonify(
@@ -340,7 +282,6 @@ def create_app(
                 ),
                 503,
             )
-
         return jsonify(
             {
                 "ok": True,
@@ -351,30 +292,25 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/node/<path:node_id>")
     def api_node(node_id: str):
         node_id = str(node_id or "").strip()
         if not node_id:
             return jsonify({"ok": False, "error": "node id required"}), 400
-
         node = None
         try:
             nodes = mesh_service.get_nodes_snapshot()
             node = nodes.get(node_id)
         except Exception:
             node = None
-
         stats = None
         if stats_db is not None:
             try:
                 stats = stats_db.get_node_stats(node_id)
             except Exception:
                 stats = None
-
         if node is None and stats is None:
             return jsonify({"ok": False, "error": "node not found"}), 404
-
         return jsonify(
             {
                 "ok": True,
@@ -383,7 +319,6 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/node/<path:node_id>/history")
     def api_node_history(node_id: str):
         node_id = str(node_id or "").strip()
@@ -391,27 +326,13 @@ def create_app(
             return jsonify({"ok": False, "error": "node id required"}), 400
         if stats_db is None:
             return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()}), 503
-
-        limit_raw = request.args.get("limit", "500")
-        since_raw = request.args.get("since", "")
-        order = request.args.get("order", "desc")
-
-        def parse_int(val: str, default: int) -> int:
-            try:
-                return int(val)
-            except Exception:
-                return default
-
-        limit = parse_int(limit_raw, 500)
-        since = parse_int(since_raw, 0) if since_raw != "" else None
-
+        limit, since, order = _parse_history_query()
         try:
             history = stats_db.list_node_history(
                 node_id=node_id, limit=limit, since=since, order=order
             )
         except Exception:
             history = []
-
         return jsonify(
             {
                 "ok": True,
@@ -421,12 +342,10 @@ def create_app(
                 "generatedAt": now_epoch(),
             }
         )
-
     @app.get("/api/stats")
     def api_stats():
         if stats_db is None:
             return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()})
-
         hours = _get_env_int("STATS_WINDOW_HOURS", 24)
         local_id = None
         getter = getattr(mesh_service, "get_radio_snapshot", None)
@@ -435,11 +354,9 @@ def create_app(
                 local_id = _local_node_id(getter())
             except Exception:
                 local_id = None
-
         summary = stats_db.summary(hours=hours, local_node_id=local_id)
         cfg = mesh_service.get_config()
-        configured = bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
-
+        configured = _is_configured(cfg)
         return jsonify(
             {
                 "ok": True,
@@ -471,21 +388,17 @@ def create_app(
                 "events": summary.recent_events,
             }
         )
-
     @app.post("/api/send")
     def api_send():
         body = request.get_json(silent=True) or {}
         text = body.get("text")
         to = body.get("to")
         channel = body.get("channel")
-
         if not isinstance(text, str) or not text.strip():
             return jsonify({"ok": False, "error": "text is required"}), 400
-
         to_clean = None
         if isinstance(to, str) and to.strip():
             to_clean = to.strip()
-
         channel_clean: Optional[int] = None
         if channel is not None:
             try:
@@ -494,7 +407,6 @@ def create_app(
                 return jsonify({"ok": False, "error": "channel must be an int"}), 400
             if channel_clean < 0:
                 return jsonify({"ok": False, "error": "channel must be >= 0"}), 400
-
         try:
             mesh_service.send_text(text.strip(), to_clean, channel=channel_clean)
             if stats_db is not None:
@@ -504,7 +416,6 @@ def create_app(
             if stats_db is not None:
                 stats_db.record_send(ok=False, error=f"{type(e).__name__}: {e}")
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
-
     @app.post("/api/config")
     def api_config():
         """
@@ -520,46 +431,37 @@ def create_app(
         mqtt_password = body.get("mqttPassword")
         mqtt_tls = body.get("mqttTls")
         mqtt_root_topic = body.get("mqttRootTopic")
-
         kwargs: Dict[str, Any] = {}
-
         if transport is not None:
             if not isinstance(transport, str):
                 return jsonify({"ok": False, "error": "transport must be a string"}), 400
             kwargs["transport"] = transport
-
         if mesh_host is not None:
             if not isinstance(mesh_host, str) or not mesh_host.strip():
                 return jsonify({"ok": False, "error": "meshHost must be a non-empty string"}), 400
             kwargs["mesh_host"] = mesh_host.strip()
-
         if mesh_port is not None:
             try:
                 kwargs["mesh_port"] = int(mesh_port)
             except Exception:
                 return jsonify({"ok": False, "error": "meshPort must be an int"}), 400
-
         if mqtt_host is not None:
             if not isinstance(mqtt_host, str) or not mqtt_host.strip():
                 return jsonify({"ok": False, "error": "mqttHost must be a non-empty string"}), 400
             kwargs["mqtt_host"] = mqtt_host.strip()
-
         if mqtt_port is not None:
             try:
                 kwargs["mqtt_port"] = int(mqtt_port)
             except Exception:
                 return jsonify({"ok": False, "error": "mqttPort must be an int"}), 400
-
         if mqtt_username is not None:
             if not isinstance(mqtt_username, str):
                 return jsonify({"ok": False, "error": "mqttUsername must be a string"}), 400
             kwargs["mqtt_username"] = mqtt_username
-
         if mqtt_password is not None:
             if not isinstance(mqtt_password, str):
                 return jsonify({"ok": False, "error": "mqttPassword must be a string"}), 400
             kwargs["mqtt_password"] = mqtt_password
-
         if mqtt_tls is not None:
             if isinstance(mqtt_tls, bool):
                 kwargs["mqtt_tls"] = mqtt_tls
@@ -567,24 +469,18 @@ def create_app(
                 kwargs["mqtt_tls"] = mqtt_tls.strip().lower() in {"1", "true", "yes", "y", "on"}
             else:
                 return jsonify({"ok": False, "error": "mqttTls must be a boolean"}), 400
-
         if mqtt_root_topic is not None:
             if not isinstance(mqtt_root_topic, str):
                 return jsonify({"ok": False, "error": "mqttRootTopic must be a string"}), 400
             kwargs["mqtt_root_topic"] = mqtt_root_topic
-
         if not kwargs:
             return jsonify({"ok": False, "error": "no config fields provided"}), 400
-
         try:
             mesh_service.reconfigure(**kwargs)
             return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 400
-
     return app
-
-
 def _local_node_id(node: Any) -> Optional[str]:
     if not isinstance(node, dict):
         return None
@@ -603,13 +499,9 @@ def _local_node_id(node: Any) -> Optional[str]:
         except Exception:
             return None
     return None
-
-
 def main() -> None:
     http_port = _get_env_int("HTTP_PORT", 8080)
     app = create_app()
     app.run(host="0.0.0.0", port=http_port, debug=False, threaded=True)
-
-
 if __name__ == "__main__":
     main()

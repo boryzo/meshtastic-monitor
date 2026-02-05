@@ -1,5 +1,4 @@
 /* global window, document, localStorage, fetch */
-
 const LS = {
   apiBaseUrl: "meshmon.apiBaseUrl",
   transport: "meshmon.transport",
@@ -14,16 +13,13 @@ const LS = {
   sendChannel: "meshmon.sendChannel",
   messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
-
 function $(id) {
   return document.getElementById(id);
 }
-
 function getApiBaseUrl() {
   const v = (localStorage.getItem(LS.apiBaseUrl) || "").trim();
   return v.replace(/\/+$/, "");
 }
-
 async function apiFetch(path, opts = {}) {
   const base = getApiBaseUrl();
   const url = base ? `${base}${path}` : path;
@@ -40,7 +36,6 @@ async function apiFetch(path, opts = {}) {
   }
   return await res.json();
 }
-
 function fmtAge(ageSec) {
   if (ageSec === null || ageSec === undefined) return "—";
   const s = Math.max(0, Number(ageSec) || 0);
@@ -49,13 +44,11 @@ function fmtAge(ageSec) {
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
 }
-
 function fmtTime(epoch) {
   if (!epoch) return "—";
   const d = new Date(epoch * 1000);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-
 let activeNodesTab = "direct";
 let lastMessagesKey = "";
 let lastHealth = null;
@@ -71,11 +64,11 @@ let lastMessages = null;
 let activeMainTab = "status";
 let activeMessageChannel = "all";
 let nodesHistory = [];
+let activeNodeId = null;
 const nodesSort = {
   direct: { key: "age", dir: "asc" }, // fresh first
   relayed: { key: "age", dir: "asc" }, // fresh first
 };
-
 function showToast(kind, text) {
   const toast = $("toast");
   toast.classList.remove("hidden", "ok", "err");
@@ -84,7 +77,6 @@ function showToast(kind, text) {
   window.clearTimeout(showToast._t);
   showToast._t = window.setTimeout(() => toast.classList.add("hidden"), 2600);
 }
-
 function setConnStatus(connected) {
   const el = $("connStatus");
   el.classList.remove("status-good", "status-bad", "status-unknown");
@@ -99,11 +91,9 @@ function setConnStatus(connected) {
     el.textContent = "Unknown";
   }
 }
-
 function getNodesSortState() {
   return nodesSort[activeNodesTab] || nodesSort.direct;
 }
-
 function qualityRank(q) {
   const v = (q || "").toString().trim().toLowerCase();
   if (!v) return null;
@@ -113,25 +103,21 @@ function qualityRank(q) {
   if (v === "bad") return 1;
   return null;
 }
-
 function cmpNullableNumber(a, b, dir = "asc") {
   const aNull = a === null || a === undefined || Number.isNaN(Number(a));
   const bNull = b === null || b === undefined || Number.isNaN(Number(b));
   if (aNull && bNull) return 0;
   if (aNull) return 1; // nulls last
   if (bNull) return -1;
-
   const av = Number(a);
   const bv = Number(b);
   if (av === bv) return 0;
   const sign = av < bv ? -1 : 1;
   return dir === "desc" ? -sign : sign;
 }
-
 function compareNodes(a, b, sortState) {
   const key = sortState && sortState.key ? String(sortState.key) : "age";
   const dir = sortState && sortState.dir === "desc" ? "desc" : "asc";
-
   let res = 0;
   if (key === "snr") {
     res = cmpNullableNumber(a.snr, b.snr, dir);
@@ -144,18 +130,15 @@ function compareNodes(a, b, sortState) {
     res = cmpNullableNumber(a.ageSec, b.ageSec, dir);
   }
   if (res !== 0) return res;
-
   // Tie-breakers: always keep freshest near top, then stable by id.
   res = cmpNullableNumber(a.ageSec, b.ageSec, "asc");
   if (res !== 0) return res;
   return String(a.id || "").localeCompare(String(b.id || ""));
 }
-
 function applyNodesSortUi() {
   const state = getNodesSortState();
   const table = $("nodesTable");
   if (!table) return;
-
   table.querySelectorAll("th[data-sort]").forEach((th) => {
     const key = th.getAttribute("data-sort");
     th.classList.remove("sorted-asc", "sorted-desc");
@@ -167,13 +150,11 @@ function applyNodesSortUi() {
     }
   });
 }
-
 function onNodesHeaderClick(ev) {
   const th = ev.target.closest("th[data-sort]");
   if (!th) return;
   const key = (th.getAttribute("data-sort") || "").trim();
   if (!key) return;
-
   const state = getNodesSortState();
   if (state.key === key) {
     state.dir = state.dir === "asc" ? "desc" : "asc";
@@ -181,32 +162,25 @@ function onNodesHeaderClick(ev) {
     state.key = key;
     state.dir = key === "age" ? "asc" : "desc";
   }
-
   applyNodesSortUi();
   if (lastNodes) renderNodes(lastNodes, $("nodeFilter").value);
 }
-
 function renderNodes(nodes, filterText) {
   const tbody = $("nodesTbody");
   const rows = [];
   const f = (filterText || "").trim().toLowerCase();
-
   const list = activeNodesTab === "direct" ? nodes.direct : nodes.relayed;
-
   const filtered = list.filter((n) => {
     if (!f) return true;
     const hay = `${n.short || ""} ${n.long || ""} ${n.id || ""}`.toLowerCase();
     return hay.includes(f);
   });
-
   const sortState = getNodesSortState();
   filtered.sort((a, b) => compareNodes(a, b, sortState));
-
   if (filtered.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9" class="muted">No nodes</td></tr>`;
     return;
   }
-
   for (const n of filtered) {
     const nodeId = n.id ? String(n.id) : "";
     const snr = n.snr === null || n.snr === undefined ? "—" : String(n.snr);
@@ -232,10 +206,34 @@ function renderNodes(nodes, filterText) {
       </tr>
     `);
   }
-
   tbody.innerHTML = rows.join("");
 }
-
+function channelSuffix(info) {
+  if (!info) return "";
+  if (info.name) return ` (${info.name})`;
+  if (info.preset) return ` (${info.preset})`;
+  return "";
+}
+function formatChannelIndexLabel(index, info) {
+  return `#${index}${channelSuffix(info)}`;
+}
+function formatChannelInfoLabel(index, info) {
+  return `Ch ${index}${channelSuffix(info)}`;
+}
+function formatChannelHashLabel(index) {
+  return `#${index} (hash)`;
+}
+function getObservedChannelIds(messages) {
+  if (!Array.isArray(messages)) return [];
+  const observed = new Set();
+  for (const m of messages) {
+    if (m.channel === null || m.channel === undefined) continue;
+    const num = Number(m.channel);
+    if (!Number.isInteger(num)) continue;
+    observed.add(String(num));
+  }
+  return Array.from(observed).sort((a, b) => Number(a) - Number(b));
+}
 function channelInfo(chNum) {
   if (chNum === null || chNum === undefined || Number.isNaN(Number(chNum))) {
     return { label: "Ch —", known: false };
@@ -243,12 +241,10 @@ function channelInfo(chNum) {
   const num = Number(chNum);
   const info = channelsByIndex.get(num);
   if (info) {
-    const name = info.name ? ` (${info.name})` : info.preset ? ` (${info.preset})` : "";
-    return { label: `Ch ${num}${name}`, known: true };
+    return { label: formatChannelInfoLabel(num, info), known: true };
   }
   return { label: `Ch hash ${num}`, known: false };
 }
-
 function renderMessages(messages) {
   const list = $("messagesList");
   const selected = activeMessageChannel;
@@ -259,7 +255,6 @@ function renderMessages(messages) {
         return String(m.channel) === String(selected);
       })
     : [];
-
   const key = JSON.stringify([
     channelsVersion,
     selected,
@@ -267,12 +262,10 @@ function renderMessages(messages) {
   ]);
   if (key === lastMessagesKey) return;
   lastMessagesKey = key;
-
   if (!filtered || filtered.length === 0) {
     list.innerHTML = `<div class="muted">No messages yet</div>`;
     return;
   }
-
   const rows = [];
   for (const m of filtered) {
     const from = m.fromId || "—";
@@ -289,7 +282,6 @@ function renderMessages(messages) {
     const direction = localRadioId && m.fromId === localRadioId ? "outgoing" : "incoming";
     const channelBadge =
       selected === "all" ? `<span class="pill">${escapeHtml(chLabel)}</span>` : "";
-
     rows.push(`
       <div class="msg ${direction}">
         <div class="meta">
@@ -305,7 +297,6 @@ function renderMessages(messages) {
   }
   list.innerHTML = rows.join("");
 }
-
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -314,7 +305,6 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-
 async function tickHealth() {
   try {
     const h = await apiFetch("/api/health");
@@ -335,7 +325,6 @@ async function tickHealth() {
     } else {
       setConnStatus(h.connected);
     }
-
     renderHealth(h);
   } catch (e) {
     $("meshHost").textContent = "—";
@@ -343,15 +332,12 @@ async function tickHealth() {
     renderHealthError(e);
   }
 }
-
 function renderHealth(h) {
   const statusText =
     h.configured === false ? "Not configured" : h.connected ? "Connected" : "Disconnected";
   const rows = [];
-
   rows.push(kv("Status", statusText));
   rows.push(kv("Transport", String(h.transport || "—")));
-
   if (h.transport === "mqtt") {
     rows.push(kv("MQTT", `${h.mqttHost || "—"}:${h.mqttPort || "—"}`));
     rows.push(kv("MQTT TLS", h.mqttTls ? "true" : "false"));
@@ -360,50 +346,41 @@ function renderHealth(h) {
   } else {
     rows.push(kv("Mesh", h.meshHost ? `${h.meshHost}:${h.meshPort}` : "—"));
   }
-
   if (h.lastError) {
     rows.push(kv("Last error", String(h.lastError), true));
   }
-
   rows.push(
     kv(
       "Updated",
       h.generatedAt ? new Date(h.generatedAt * 1000).toLocaleTimeString() : "—"
     )
   );
-
   $("healthDetails").innerHTML = rows.join("");
   $("healthJson").textContent = JSON.stringify(h, null, 2);
 }
-
 function renderHealthError(e) {
   $("healthDetails").innerHTML = `<div class="muted">Failed to load: ${escapeHtml(e.message)}</div>`;
   $("healthJson").textContent = "";
 }
-
 function kv(key, value, isErr = false) {
   return `<div class="k">${escapeHtml(key)}</div><div class="v${isErr ? " err" : ""}">${escapeHtml(value)}</div>`;
 }
-
 function fmtNum(val, digits = 2) {
   if (val === null || val === undefined) return "—";
   const n = Number(val);
   if (Number.isNaN(n)) return "—";
   return n.toFixed(digits);
 }
-
 function fmtBool(val) {
   if (val === true) return "true";
   if (val === false) return "false";
   return "—";
 }
-
 function fmtCount(val) {
   if (val === null || val === undefined) return "0";
   const n = Number(val);
   return Number.isNaN(n) ? "0" : String(Math.max(0, Math.trunc(n)));
 }
-
 function fmtNumCompact(val) {
   if (val === null || val === undefined) return "—";
   const n = Number(val);
@@ -412,7 +389,6 @@ function fmtNumCompact(val) {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(Math.trunc(n));
 }
-
 function appNameForMessage(m) {
   const raw = m.app || m.portnum;
   if (!raw) return null;
@@ -431,19 +407,16 @@ function appNameForMessage(m) {
   if (num === 0x43) return "Telemetry";
   return null;
 }
-
 function isAppRequestForMe(m, appName) {
   if (!appName) return false;
   const hasRequestId = m.requestId !== null && m.requestId !== undefined;
   const wantsResponse = m.wantResponse === true;
   if (!hasRequestId && !wantsResponse) return false;
-
   if (!localRadioId) return true;
   if (m.fromId && m.fromId === localRadioId) return false; // my own request
   if (!m.toId) return true;
   return m.toId === localRadioId;
 }
-
 let lastNodes = null;
 async function tickNodes() {
   try {
@@ -458,19 +431,16 @@ async function tickNodes() {
       src = add > 0 ? ` • ${n.meshCount} mesh + ${add} observed` : ` • ${n.meshCount} mesh`;
     }
     $("nodesMeta").textContent = `${n.total} total${src} • updated ${new Date(n.generatedAt * 1000).toLocaleTimeString()}`;
-
     // Hide SNR/Quality columns on relayed tab
     const showDirectCols = activeNodesTab === "direct";
     [".col-snr", ".col-quality"].forEach((cls) => {
       document.querySelectorAll(cls).forEach((el) => (el.style.display = showDirectCols ? "" : "none"));
     });
-
     applyNodesSortUi();
   } catch (e) {
     $("nodesMeta").textContent = `Failed to load nodes: ${e.message}`;
   }
 }
-
 async function tickRadio() {
   try {
     const data = await apiFetch("/api/radio");
@@ -480,17 +450,14 @@ async function tickRadio() {
     $("radioMeta").textContent = "—";
   }
 }
-
 function renderRadio(data) {
   const details = $("radioDetails");
   const meta = $("radioMeta");
-
   if (!data || data.ok === false) {
     details.innerHTML = `<div class="muted">Not available</div>`;
     meta.textContent = "—";
     return;
   }
-
   const node = data.node;
   if (!node) {
     const status = data.configured === false ? "Not configured" : data.connected ? "Connected" : "Disconnected";
@@ -499,9 +466,7 @@ function renderRadio(data) {
     localRadioId = null;
     return;
   }
-
   localRadioId = node.id || null;
-
   const rows = [];
   rows.push(kv("Status", data.connected ? "Connected" : "Disconnected"));
   rows.push(kv("ID", node.id || "—"));
@@ -522,7 +487,6 @@ function renderRadio(data) {
   rows.push(kv("Muted", fmtBool(node.isMuted)));
   rows.push(kv("Ignored", fmtBool(node.isIgnored)));
   rows.push(kv("Via MQTT", fmtBool(node.viaMqtt)));
-
   if (node.position) {
     const lat = node.position.latitude !== undefined ? fmtNum(node.position.latitude, 5) : "—";
     const lon = node.position.longitude !== undefined ? fmtNum(node.position.longitude, 5) : "—";
@@ -531,13 +495,11 @@ function renderRadio(data) {
     rows.push(kv("Lon", lon));
     rows.push(kv("Alt", alt));
   }
-
   details.innerHTML = rows.join("");
   meta.textContent = data.generatedAt
     ? `updated ${new Date(data.generatedAt * 1000).toLocaleTimeString()}`
     : "—";
 }
-
 async function loadNodeDetails(nodeId) {
   if (!nodeId) return;
   lastNodeDetailsId = nodeId;
@@ -545,12 +507,12 @@ async function loadNodeDetails(nodeId) {
   try {
     const data = await apiFetch(`/api/node/${encodeURIComponent(nodeId)}`);
     renderNodeDetails(nodeId, data);
+    renderNodeMessages(nodeId);
   } catch (e) {
     $("nodeDetails").innerHTML = `<div class="muted">Failed to load: ${escapeHtml(e.message)}</div>`;
     $("nodeDetailsMeta").textContent = "—";
   }
 }
-
 function renderNodeDetails(nodeId, data) {
   const el = $("nodeDetails");
   if (!data || data.ok === false) {
@@ -558,11 +520,9 @@ function renderNodeDetails(nodeId, data) {
     $("nodeDetailsMeta").textContent = "—";
     return;
   }
-
   const node = data.node || {};
   const stats = data.stats || {};
   const rows = [];
-
   rows.push(kv("ID", nodeId));
   rows.push(kv("Short", node.short || "—"));
   rows.push(kv("Long", node.long || "—"));
@@ -577,22 +537,62 @@ function renderNodeDetails(nodeId, data) {
   rows.push(kv("Last Rx", stats.lastRx ? fmtTime(stats.lastRx) : "—"));
   rows.push(kv("From Count", fmtCount(stats.fromCount)));
   rows.push(kv("To Count", fmtCount(stats.toCount)));
-
   el.innerHTML = rows.join("");
   $("nodeDetailsMeta").textContent = data.generatedAt
     ? `updated ${new Date(data.generatedAt * 1000).toLocaleTimeString()}`
     : "—";
 }
-
+function renderNodeMessages(nodeId) {
+  const list = $("nodeMessages");
+  if (!list) return;
+  if (!nodeId) {
+    list.innerHTML = `<div class="muted">Select a node to view messages.</div>`;
+    return;
+  }
+  if (!Array.isArray(lastMessages)) {
+    list.innerHTML = `<div class="muted">Loading…</div>`;
+    return;
+  }
+  const filtered = lastMessages.filter(
+    (m) => String(m.fromId || "") === String(nodeId) || String(m.toId || "") === String(nodeId)
+  );
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="muted">No messages for this node yet.</div>`;
+    return;
+  }
+  const recent = filtered.slice(-50);
+  const rows = recent.map((m) => {
+    const from = m.fromId || "—";
+    const to = m.toId || "—";
+    const snr = m.snr === null || m.snr === undefined ? "—" : String(m.snr);
+    const rssi = m.rssi === null || m.rssi === undefined ? "—" : String(m.rssi);
+    const text = m.text
+      ? escapeHtml(m.text)
+      : `<span class="muted">port ${escapeHtml(String(m.portnum ?? "—"))}</span>`;
+    const direction = localRadioId && m.fromId === localRadioId ? "outgoing" : "incoming";
+    return `
+      <div class="msg ${direction}">
+        <div class="meta">
+          <span>${escapeHtml(fmtTime(m.rxTime))}</span>
+          <span class="mono">${escapeHtml(from)} → ${escapeHtml(to)}</span>
+          <span>SNR ${escapeHtml(snr)} / RSSI ${escapeHtml(rssi)}</span>
+        </div>
+        <div class="text">${text}</div>
+      </div>
+    `;
+  });
+  list.innerHTML = rows.join("");
+}
 async function tickMessages() {
   try {
-    const limitRaw = ($("messagesHistoryLimit") && $("messagesHistoryLimit").value) || "200";
+    const limitRaw = ($("messagesHistoryLimit") && $("messagesHistoryLimit").value) || "0";
     const limit = Number(limitRaw);
     const qs = Number.isFinite(limit) ? `?limit=${limit}` : "";
     const msgs = await apiFetch(`/api/messages${qs}`);
     lastMessages = msgs;
     notifyIfNewMessages(msgs);
     renderMessages(msgs);
+    if (activeNodeId) renderNodeMessages(activeNodeId);
     const limitLabel = limitRaw === "0" ? "all" : `last ${limitRaw}`;
     let meta = `${msgs.length} messages (${limitLabel}) • refresh ${new Date().toLocaleTimeString()}`;
     if (unreadCount > 0) meta += ` • unread ${unreadCount}`;
@@ -601,7 +601,6 @@ async function tickMessages() {
     $("messagesMeta").textContent = `Failed to load messages: ${e.message}`;
   }
 }
-
 function messageFingerprint(m) {
   const parts = [
     m.rxTime,
@@ -617,7 +616,6 @@ function messageFingerprint(m) {
     .map((v) => (v === null || v === undefined ? "" : String(v)))
     .join("|");
 }
-
 function countNewMessages(messages, lastFp) {
   if (!lastFp) return 0;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -628,23 +626,19 @@ function countNewMessages(messages, lastFp) {
   // Ring buffer rotated or missing history; assume "some" new messages.
   return Math.min(messages.length, 51);
 }
-
 function msgPreview(m) {
   if (m.error) return `error: ${String(m.error)}`;
   const t = typeof m.text === "string" ? m.text.trim() : "";
   if (t) return t.length > 80 ? `${t.slice(0, 80)}…` : t;
   return `port ${m.portnum ?? "—"}`;
 }
-
 function updateTitle() {
   document.title = unreadCount > 0 ? `(${unreadCount}) ${baseTitle}` : baseTitle;
 }
-
 function recordNodesHistory(total, generatedAt) {
   const t = typeof generatedAt === "number" ? generatedAt : Math.floor(Date.now() / 1000);
   const count = Number(total);
   if (!Number.isFinite(count)) return;
-
   const last = nodesHistory.length ? nodesHistory[nodesHistory.length - 1] : null;
   if (last && last.ts === t) {
     last.total = count;
@@ -656,7 +650,6 @@ function recordNodesHistory(total, generatedAt) {
   }
   renderNodesVisibleHistory();
 }
-
 function renderNodesVisibleHistory() {
   const el = $("statsNodesVisible");
   if (!el) return;
@@ -676,67 +669,51 @@ function renderNodesVisibleHistory() {
   });
   el.innerHTML = bars.join("");
 }
-
 function setMainTab(tab) {
-  activeMainTab = tab;
+  const mapped = tab === "messages" ? "channels" : tab;
+  activeMainTab = mapped;
   document.querySelectorAll(".tab-panel").forEach((panel) => {
-    const isActive = panel.getAttribute("data-tab") === tab;
+    const isActive = panel.getAttribute("data-tab") === mapped;
     panel.classList.toggle("active", isActive);
   });
   document.querySelectorAll("[data-main-tab]").forEach((btn) => {
-    const isActive = btn.getAttribute("data-main-tab") === tab;
+    const isActive = btn.getAttribute("data-main-tab") === mapped;
     btn.classList.toggle("active", isActive);
     if (btn.getAttribute("data-main-tab")) {
       btn.setAttribute("aria-pressed", isActive ? "true" : "false");
     }
   });
-  localStorage.setItem("meshmon.mainTab", tab);
+  localStorage.setItem("meshmon.mainTab", mapped);
 }
-
 function updateMessageChannelTabs(channels) {
   const container = $("messageChannelTabs");
   if (!container) return;
-
   const items = [{ id: "all", label: "All" }];
   const seen = new Set();
   if (Array.isArray(channels)) {
     for (const ch of channels) {
       if (typeof ch.index !== "number") continue;
-      const name = ch.name ? ` ${ch.name}` : "";
-      const preset = ch.preset ? ` (${ch.preset})` : "";
       const id = String(ch.index);
-      items.push({ id, label: `#${ch.index}${name}${preset}` });
+      items.push({ id, label: formatChannelIndexLabel(ch.index, ch) });
       seen.add(id);
     }
   }
-  if (Array.isArray(lastMessages)) {
-    const observed = new Set();
-    for (const m of lastMessages) {
-      if (m.channel === null || m.channel === undefined) continue;
-      const num = Number(m.channel);
-      if (!Number.isInteger(num)) continue;
-      observed.add(String(num));
-    }
-    for (const id of Array.from(observed).sort((a, b) => Number(a) - Number(b))) {
-      if (seen.has(id)) continue;
-      items.push({ id, label: `#${id} (hash)` });
-    }
+  for (const id of getObservedChannelIds(lastMessages)) {
+    if (seen.has(id)) continue;
+    items.push({ id, label: formatChannelHashLabel(id) });
   }
-
   container.innerHTML = items
     .map(
       (it) =>
         `<button class="tab" data-msg-channel="${escapeHtml(it.id)}">${escapeHtml(it.label)}</button>`
     )
     .join("");
-
   const selected = String(activeMessageChannel || "all");
   container.querySelectorAll("[data-msg-channel]").forEach((btn) => {
     const isActive = btn.getAttribute("data-msg-channel") === selected;
     btn.classList.toggle("active", isActive);
   });
 }
-
 function setMessageChannel(channelId) {
   activeMessageChannel = channelId || "all";
   const container = $("messageChannelTabs");
@@ -748,44 +725,38 @@ function setMessageChannel(channelId) {
     });
   }
   if (lastMessages) renderMessages(lastMessages);
-
   if (activeMessageChannel !== "all") {
     const select = $("sendChannel");
+    const nodeSelect = $("nodeSendChannel");
     const num = Number(activeMessageChannel);
-    if (select && Number.isInteger(num) && channelsByIndex.has(num)) {
-      select.value = String(activeMessageChannel);
-      localStorage.setItem(LS.sendChannel, select.value || "");
+    if (Number.isInteger(num) && channelsByIndex.has(num)) {
+      if (select) select.value = String(activeMessageChannel);
+      if (nodeSelect) nodeSelect.value = String(activeMessageChannel);
+      localStorage.setItem(LS.sendChannel, String(activeMessageChannel));
     }
   }
 }
-
 function notifyIfNewMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
     lastMessageFp = null;
     return;
   }
-
   const newest = messages[messages.length - 1];
   const newestFp = messageFingerprint(newest);
-
   if (lastMessageFp && newestFp !== lastMessageFp) {
     const count = countNewMessages(messages, lastMessageFp);
     const countLabel = count > 50 ? "50+ new messages" : `${count} new message${count === 1 ? "" : "s"}`;
     const from = newest.fromId || "—";
     const to = newest.toId || "—";
     const preview = msgPreview(newest);
-
     showToast("ok", `${countLabel}: ${from} → ${to} • ${preview}`);
-
     if (document.hidden) {
       unreadCount += count > 50 ? 50 : count;
       updateTitle();
     }
   }
-
   lastMessageFp = newestFp;
 }
-
 async function tickStats() {
   try {
     const data = await apiFetch("/api/stats");
@@ -801,7 +772,6 @@ async function tickStats() {
     );
   }
 }
-
 function prettyAppName(app) {
   if (!app) return "—";
   if (app === "POSITION_APP") return "Position";
@@ -810,7 +780,6 @@ function prettyAppName(app) {
   if (app === "TELEMETRY_APP") return "Telemetry";
   return String(app);
 }
-
 function renderBars(hourly) {
   const el = $("statsHourly");
   if (!el) return;
@@ -835,7 +804,6 @@ function renderBars(hourly) {
   });
   el.innerHTML = bars.join("");
 }
-
 function renderList(elId, items, formatter, emptyText) {
   const el = $(elId);
   if (!el) return;
@@ -845,7 +813,6 @@ function renderList(elId, items, formatter, emptyText) {
   }
   el.innerHTML = items.map(formatter).join("");
 }
-
 function renderStats(data) {
   if (!data || data.ok === false) {
     $("statsMeta").textContent = data && data.error ? data.error : "Stats disabled";
@@ -858,23 +825,19 @@ function renderStats(data) {
     );
     return;
   }
-
   const key = JSON.stringify([data.generatedAt, data.counters, data.messages, data.apps, data.nodes, data.events]);
   if (key === lastStatsKey) return;
   lastStatsKey = key;
-
   const counters = data.counters || {};
   const messages = data.messages || {};
   const apps = data.apps || {};
   const nodes = data.nodes || {};
   const events = data.events || [];
-
   const updated = data.generatedAt
     ? new Date(data.generatedAt * 1000).toLocaleTimeString()
     : "—";
   const windowHours = messages.windowHours || data.windowHours || "—";
   $("statsMeta").textContent = `db ${data.dbPath || "—"} • window ${windowHours}h • updated ${updated}`;
-
   const currentNodes = lastNodes ? lastNodes.total : null;
   const summary = `
     <div class="stat">
@@ -907,10 +870,8 @@ function renderStats(data) {
     </div>
   `;
   $("statsSummary").innerHTML = summary;
-
   renderNodesVisibleHistory();
   renderBars(messages.hourlyWindow || []);
-
   renderList(
     "statsApps",
     apps.counts || [],
@@ -922,7 +883,6 @@ function renderStats(data) {
       </div>`,
     "No app stats yet"
   );
-
   renderList(
     "statsAppRequests",
     apps.requestsToMe || [],
@@ -934,7 +894,6 @@ function renderStats(data) {
       </div>`,
     "No requests recorded"
   );
-
   renderList(
     "statsTopFrom",
     nodes.topFrom || [],
@@ -946,7 +905,6 @@ function renderStats(data) {
       </div>`,
     "No incoming yet"
   );
-
   renderList(
     "statsTopTo",
     nodes.topTo || [],
@@ -958,7 +916,6 @@ function renderStats(data) {
       </div>`,
     "No outgoing yet"
   );
-
   renderList(
     "statsEvents",
     events || [],
@@ -971,7 +928,6 @@ function renderStats(data) {
     "No recent events"
   );
 }
-
 async function tickChannels() {
   try {
     const data = await apiFetch("/api/channels");
@@ -990,81 +946,64 @@ async function tickChannels() {
     channelsVersion += 1;
     renderChannels(data);
   } catch (e) {
-    $("channelsMeta").textContent = `Failed to load channels: ${e.message}`;
+    const meta = $("channelsMeta");
+    if (meta) meta.textContent = `Failed to load channels: ${e.message}`;
   }
 }
-
 function renderChannels(data) {
-  const tbody = $("channelsTbody");
   const list = Array.isArray(data.channels) ? data.channels : [];
   updateSendChannelOptions(list);
   updateMessageChannelTabs(list);
-  if (list.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="muted">No channels</td></tr>`;
-    $("channelsMeta").textContent = `0 channels`;
-    return;
-  }
-
-  const rows = [];
-  for (const ch of list) {
-    const idx = ch.index === null || ch.index === undefined ? "—" : String(ch.index);
-    const name = ch.name || "—";
-    const role = ch.role || "—";
-    const enabled =
-      ch.enabled === true ? "true" : ch.enabled === false ? "false" : "—";
-    rows.push(`
-      <tr>
-        <td class="col-ch-index">${escapeHtml(idx)}</td>
-        <td>${escapeHtml(name)}</td>
-        <td>${escapeHtml(role)}</td>
-        <td>${escapeHtml(enabled)}</td>
-      </tr>
-    `);
-  }
-  tbody.innerHTML = rows.join("");
   const updated = data.generatedAt ? new Date(data.generatedAt * 1000).toLocaleTimeString() : "—";
-  $("channelsMeta").textContent = `${list.length} channels • updated ${updated}`;
-
+  if ($("channelsMeta")) {
+    $("channelsMeta").textContent = `${list.length} channels • updated ${updated}`;
+  }
 }
-
 function updateSendChannelOptions(channels) {
-  const select = $("sendChannel");
-  if (!select) return;
-
-  const current = (select.value || localStorage.getItem(LS.sendChannel) || "").trim();
+  const selects = [$("sendChannel"), $("nodeSendChannel")].filter(Boolean);
+  const current = (localStorage.getItem(LS.sendChannel) || "").trim();
   const opts = [`<option value="">Auto (default)</option>`];
   const seen = new Set();
   if (Array.isArray(channels)) {
     for (const ch of channels) {
       if (typeof ch.index !== "number") continue;
       const idx = String(ch.index);
-      const name = ch.name ? ` ${ch.name}` : "";
-      const preset = ch.preset ? ` (${ch.preset})` : "";
-      const label = `#${idx}${name}${preset}`;
+      const label = formatChannelIndexLabel(ch.index, ch);
       opts.push(`<option value="${escapeHtml(idx)}">${escapeHtml(label)}</option>`);
       seen.add(idx);
     }
   }
-  if (Array.isArray(lastMessages)) {
-    const observed = new Set();
-    for (const m of lastMessages) {
-      if (m.channel === null || m.channel === undefined) continue;
-      const num = Number(m.channel);
-      if (!Number.isInteger(num)) continue;
-      observed.add(String(num));
-    }
-    for (const idx of Array.from(observed).sort((a, b) => Number(a) - Number(b))) {
-      if (seen.has(idx)) continue;
-      const label = `#${idx} (hash)`;
-      opts.push(
-        `<option value="${escapeHtml(idx)}" disabled>${escapeHtml(label)}</option>`
-      );
+  for (const idx of getObservedChannelIds(lastMessages)) {
+    if (seen.has(idx)) continue;
+    const label = formatChannelHashLabel(idx);
+    opts.push(`<option value="${escapeHtml(idx)}" disabled>${escapeHtml(label)}</option>`);
+  }
+  for (const select of selects) {
+    select.innerHTML = opts.join("");
+    if (current) {
+      select.value = current;
     }
   }
-  select.innerHTML = opts.join("");
-  if (current) {
-    select.value = current;
+}
+function openNodeModal(nodeId) {
+  activeNodeId = nodeId;
+  $("nodeModalBackdrop").classList.remove("hidden");
+  $("nodeModal").classList.remove("hidden");
+  $("nodeModalBackdrop").setAttribute("aria-hidden", "false");
+  if ($("nodeSendResult")) $("nodeSendResult").textContent = "";
+  if (nodeId) {
+    $("nodeDetailsMeta").textContent = `Loading ${nodeId}…`;
+    loadNodeDetails(nodeId);
+    renderNodeMessages(nodeId);
+    const textEl = $("nodeSendText");
+    if (textEl) textEl.focus();
   }
+}
+function closeNodeModal() {
+  $("nodeModalBackdrop").classList.add("hidden");
+  $("nodeModal").classList.add("hidden");
+  $("nodeModalBackdrop").setAttribute("aria-hidden", "true");
+  activeNodeId = null;
 }
 function openModal() {
   $("modalBackdrop").classList.remove("hidden");
@@ -1074,23 +1013,19 @@ function openModal() {
   $("transportSelect").value = localStorage.getItem(LS.transport) || "tcp";
   $("meshHostInput").value = localStorage.getItem(LS.meshHost) || "";
   $("meshPortInput").value = localStorage.getItem(LS.meshPort) || "4403";
-
   $("mqttHostInput").value = localStorage.getItem(LS.mqttHost) || "";
   $("mqttPortInput").value = localStorage.getItem(LS.mqttPort) || "1883";
   $("mqttUsernameInput").value = localStorage.getItem(LS.mqttUsername) || "";
   $("mqttPasswordInput").value = localStorage.getItem(LS.mqttPassword) || "";
   $("mqttTlsInput").checked = (localStorage.getItem(LS.mqttTls) || "") === "1";
   $("mqttRootTopicInput").value = localStorage.getItem(LS.mqttRootTopic) || "";
-
   applyTransportUi();
 }
-
 function closeModal() {
   $("modalBackdrop").classList.add("hidden");
   $("modal").classList.add("hidden");
   $("modalBackdrop").setAttribute("aria-hidden", "true");
 }
-
 function applyTransportUi() {
   const transport = ($("transportSelect").value || "tcp").toLowerCase();
   if (transport === "mqtt") {
@@ -1101,20 +1036,17 @@ function applyTransportUi() {
     $("tcpSettings").classList.remove("hidden");
   }
 }
-
 async function saveSettings() {
   const apiBaseUrl = ($("apiBaseUrl").value || "").trim();
   const transport = ($("transportSelect").value || "tcp").trim().toLowerCase();
   const meshHost = ($("meshHostInput").value || "").trim();
   const meshPort = ($("meshPortInput").value || "").trim();
-
   const mqttHost = ($("mqttHostInput").value || "").trim();
   const mqttPort = ($("mqttPortInput").value || "").trim();
   const mqttUsername = ($("mqttUsernameInput").value || "").trim();
   const mqttPassword = ($("mqttPasswordInput").value || "").trim();
   const mqttTls = $("mqttTlsInput").checked;
   const mqttRootTopic = ($("mqttRootTopicInput").value || "").trim();
-
   localStorage.setItem(LS.apiBaseUrl, apiBaseUrl);
   localStorage.setItem(LS.transport, transport);
   localStorage.setItem(LS.meshHost, meshHost);
@@ -1127,7 +1059,6 @@ async function saveSettings() {
   }
   localStorage.setItem(LS.mqttTls, mqttTls ? "1" : "0");
   localStorage.setItem(LS.mqttRootTopic, mqttRootTopic);
-
   if (transport === "tcp" && !meshHost) {
     showToast("err", "Meshtastic host is required for TCP");
     return;
@@ -1136,25 +1067,21 @@ async function saveSettings() {
     showToast("err", "MQTT host is required for MQTT");
     return;
   }
-
   const body = { transport };
   if (meshHost) body.meshHost = meshHost;
   if (meshPort) body.meshPort = Number(meshPort || "4403");
-
   if (mqttHost) body.mqttHost = mqttHost;
   if (mqttPort) body.mqttPort = Number(mqttPort || "1883");
   if (mqttUsername) body.mqttUsername = mqttUsername;
   if (mqttPassword) body.mqttPassword = mqttPassword; // omit when blank => keep current
   body.mqttTls = mqttTls;
   if (mqttRootTopic) body.mqttRootTopic = mqttRootTopic;
-
   try {
     await apiFetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-
     if (transport === "mqtt") {
       showToast("ok", `Applied MQTT: ${mqttHost}:${mqttPort || "1883"}`);
     } else {
@@ -1165,10 +1092,8 @@ async function saveSettings() {
   } catch (e) {
     showToast("err", `Failed to apply settings: ${e.message}`);
   }
-
   closeModal();
 }
-
 function downloadJson(obj, filename) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -1180,7 +1105,6 @@ function downloadJson(obj, filename) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-
 async function copyHealthJson() {
   if (!lastHealth) {
     showToast("err", "Health not loaded yet");
@@ -1201,7 +1125,6 @@ async function copyHealthJson() {
     showToast("ok", "Copied health JSON");
   }
 }
-
 function toggleHealthJson() {
   const pre = $("healthJson");
   const btn = $("btnToggleHealthJson");
@@ -1214,7 +1137,6 @@ function toggleHealthJson() {
     btn.textContent = "Show JSON";
   }
 }
-
 async function exportConfig() {
   try {
     const h = await apiFetch("/api/health");
@@ -1235,7 +1157,6 @@ async function exportConfig() {
     } catch (e) {
       deviceConfigError = e.message;
     }
-
     const exported = {
       exportedAt: new Date().toISOString(),
       apiBaseUrl: localStorage.getItem(LS.apiBaseUrl) || "",
@@ -1256,7 +1177,6 @@ async function exportConfig() {
       secretsIncluded: includeSecrets,
       note: "mqttPassword is not included in exports; device config may omit PSKs unless included",
     };
-
     const safeTransport = String(h.transport || "tcp").toLowerCase();
     const suffix = safeTransport === "mqtt" ? "mqtt" : "tcp";
     downloadJson(exported, `meshtastic-monitor-config.${suffix}.json`);
@@ -1269,23 +1189,19 @@ async function exportConfig() {
     showToast("err", `Export failed: ${e.message}`);
   }
 }
-
 async function onSend(ev) {
   ev.preventDefault();
   const textEl = $("sendText");
   const toEl = $("sendTo");
   const channelEl = $("sendChannel");
-
   const text = (textEl.value || "").trim();
-  const to = (toEl.value || "").trim();
+  const to = toEl ? (toEl.value || "").trim() : "";
   const channelRaw = channelEl ? (channelEl.value || "").trim() : "";
   $("sendResult").textContent = "";
-
   if (!text) {
     showToast("err", "Text is required");
     return;
   }
-
   let channel = undefined;
   if (channelRaw) {
     const num = Number(channelRaw);
@@ -1295,7 +1211,6 @@ async function onSend(ev) {
     }
     channel = num;
   }
-
   try {
     await apiFetch("/api/send", {
       method: "POST",
@@ -1309,42 +1224,63 @@ async function onSend(ev) {
     showToast("err", `Send failed: ${e.message}`);
   }
 }
-
+async function onNodeSend(ev) {
+  ev.preventDefault();
+  if (!activeNodeId) return;
+  const textEl = $("nodeSendText");
+  const channelEl = $("nodeSendChannel");
+  const text = (textEl.value || "").trim();
+  const channelRaw = channelEl ? (channelEl.value || "").trim() : "";
+  $("nodeSendResult").textContent = "";
+  if (!text) {
+    showToast("err", "Text is required");
+    return;
+  }
+  let channel = undefined;
+  if (channelRaw) {
+    const num = Number(channelRaw);
+    if (!Number.isInteger(num) || num < 0) {
+      showToast("err", "Channel must be a non-negative integer");
+      return;
+    }
+    channel = num;
+  }
+  try {
+    await apiFetch("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, to: activeNodeId, channel }),
+    });
+    textEl.value = "";
+    showToast("ok", `Message sent to ${activeNodeId}`);
+  } catch (e) {
+    $("nodeSendResult").textContent = e.message;
+    showToast("err", `Send failed: ${e.message}`);
+  }
+}
 function onNodeRowClick(ev) {
   const tr = ev.target.closest("tr[data-node-id]");
   if (!tr) return;
   const nodeId = (tr.getAttribute("data-node-id") || "").trim();
   if (!nodeId) return;
-
-  $("sendTo").value = nodeId;
-  loadNodeDetails(nodeId);
-  setMainTab("messages");
-  $("sendText").focus();
-  try {
-    $("sendText").scrollIntoView({ behavior: "smooth", block: "center" });
-  } catch {
-    // ignore if not supported
-  }
-  showToast("ok", `To: ${nodeId}`);
+  openNodeModal(nodeId);
 }
-
 function init() {
   const savedMain = localStorage.getItem("meshmon.mainTab");
-  if (savedMain) activeMainTab = savedMain;
+  if (savedMain) activeMainTab = savedMain === "messages" ? "channels" : savedMain;
   setMainTab(activeMainTab);
-
   const savedHistory = localStorage.getItem(LS.messagesHistoryLimit);
-  if (savedHistory && $("messagesHistoryLimit")) {
-    $("messagesHistoryLimit").value = savedHistory;
+  if ($("messagesHistoryLimit")) {
+    const value = savedHistory || "0";
+    $("messagesHistoryLimit").value = value;
+    if (!savedHistory) localStorage.setItem(LS.messagesHistoryLimit, value);
   }
-
   document.querySelectorAll("[data-main-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const tab = btn.getAttribute("data-main-tab") || "status";
       setMainTab(tab);
     });
   });
-
   const msgTabContainer = $("messageChannelTabs");
   if (msgTabContainer) {
     msgTabContainer.addEventListener("click", (ev) => {
@@ -1354,10 +1290,11 @@ function init() {
       setMessageChannel(id);
     });
   }
-
   $("btnSettings").addEventListener("click", openModal);
   $("btnCloseModal").addEventListener("click", closeModal);
   $("modalBackdrop").addEventListener("click", closeModal);
+  $("btnCloseNodeModal").addEventListener("click", closeNodeModal);
+  $("nodeModalBackdrop").addEventListener("click", closeNodeModal);
   $("btnSaveSettings").addEventListener("click", saveSettings);
   $("btnExportSettings").addEventListener("click", exportConfig);
   $("transportSelect").addEventListener("change", applyTransportUi);
@@ -1366,13 +1303,16 @@ function init() {
   $("sendChannel").addEventListener("change", () => {
     localStorage.setItem(LS.sendChannel, $("sendChannel").value || "");
   });
+  if ($("nodeSendChannel")) {
+    $("nodeSendChannel").addEventListener("change", () => {
+      localStorage.setItem(LS.sendChannel, $("nodeSendChannel").value || "");
+    });
+  }
   $("messagesHistoryLimit").addEventListener("change", () => {
-    localStorage.setItem(LS.messagesHistoryLimit, $("messagesHistoryLimit").value || "200");
+    localStorage.setItem(LS.messagesHistoryLimit, $("messagesHistoryLimit").value || "0");
     tickMessages();
   });
-
   $("nodesTable").addEventListener("click", onNodesHeaderClick);
-
   $("tabDirect").addEventListener("click", () => {
     activeNodesTab = "direct";
     $("tabDirect").classList.add("active");
@@ -1389,15 +1329,12 @@ function init() {
     applyNodesSortUi();
     tickNodes();
   });
-
   $("nodeFilter").addEventListener("input", () => {
     if (lastNodes) renderNodes(lastNodes, $("nodeFilter").value);
   });
-
   $("nodesTbody").addEventListener("click", onNodeRowClick);
-
   $("sendForm").addEventListener("submit", onSend);
-
+  $("nodeSendForm").addEventListener("submit", onNodeSend);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       unreadCount = 0;
@@ -1408,7 +1345,6 @@ function init() {
     unreadCount = 0;
     updateTitle();
   });
-
   tickHealth();
   tickNodes();
   tickChannels();
@@ -1416,7 +1352,6 @@ function init() {
   tickMessages();
   tickStats();
   if (lastNodeDetailsId) loadNodeDetails(lastNodeDetailsId);
-
   window.setInterval(tickHealth, 2500);
   window.setInterval(tickNodes, 5000);
   window.setInterval(tickChannels, 15000);
@@ -1424,5 +1359,4 @@ function init() {
   window.setInterval(tickMessages, 2000);
   window.setInterval(tickStats, 10000);
 }
-
 document.addEventListener("DOMContentLoaded", init);

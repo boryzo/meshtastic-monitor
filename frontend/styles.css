@@ -371,6 +371,16 @@ textarea.input {
   max-height: 520px;
   overflow: auto;
 }
+.messages.compact {
+  max-height: 240px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.messages.compact .msg {
+  max-width: 100%;
+}
 .msg {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.05);
@@ -410,6 +420,14 @@ textarea.input {
   gap: 10px;
   border-top: 1px solid var(--border);
 }
+.divider {
+  border-top: 1px solid var(--border);
+  margin: 6px 0;
+}
+.node-chat h4 {
+  margin: 0;
+  font-size: 13px;
+}
 .field label {
   display: block;
   font-size: 12px;
@@ -441,6 +459,9 @@ textarea.input {
   box-shadow: var(--shadow);
   z-index: 10;
   overflow: hidden;
+}
+.node-modal {
+  width: min(820px, calc(100vw - 24px));
 }
 .modal-header,
 .modal-footer {

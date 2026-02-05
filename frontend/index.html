@@ -19,7 +19,7 @@
 
       <nav class="actions top-nav" aria-label="Primary">
         <button class="btn" data-main-tab="nodes">🧭 Nodes</button>
-        <button class="btn" data-main-tab="messages">💬 Messages</button>
+        <button class="btn" data-main-tab="channels">💬 Channels</button>
         <button class="btn" data-main-tab="status">🟢 Status</button>
         <button class="btn" data-main-tab="stats">📊 Stats</button>
         <button id="btnSettings" class="btn">⚙️ Settings</button>
@@ -95,48 +95,11 @@
         <div class="card-footer muted" id="nodesMeta">—</div>
       </section>
 
-      <section class="card tab-panel" data-tab="nodes">
-        <div class="card-header">
-          <h2>Node Details</h2>
-          <div class="row">
-            <div class="muted" id="nodeDetailsMeta">Select a node…</div>
-          </div>
-        </div>
-        <div id="nodeDetails" class="kv">
-          <div class="muted">Click a node row to view stats.</div>
-        </div>
-      </section>
-
-      <section class="card tab-panel" data-tab="nodes">
+      <section class="card tab-panel" data-tab="channels">
         <div class="card-header">
           <h2>Channels</h2>
           <div class="row">
             <div class="muted" id="channelsMeta">—</div>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table class="table" id="channelsTable">
-            <thead>
-              <tr>
-                <th class="col-ch-index">#</th>
-                <th>Name</th>
-                <th>Role</th>
-                <th>Enabled</th>
-              </tr>
-            </thead>
-            <tbody id="channelsTbody">
-              <tr>
-                <td colspan="4" class="muted">Loading…</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="card tab-panel" data-tab="messages">
-        <div class="card-header">
-          <h2>Messages</h2>
-          <div class="row">
             <div class="muted" id="messagesMeta">—</div>
             <select id="messagesHistoryLimit" class="input small">
               <option value="200">Last 200</option>
@@ -154,10 +117,6 @@
           <div class="field">
             <label for="sendText">Text</label>
             <textarea id="sendText" class="input" rows="3" required></textarea>
-          </div>
-          <div class="field">
-            <label for="sendTo">To (optional node id)</label>
-            <input id="sendTo" class="input" placeholder="!abcd1234" />
           </div>
           <div class="field">
             <label for="sendChannel">Channel</label>
@@ -312,6 +271,45 @@
           </button>
         </div>
         <div class="hint">Settings are applied via <code>/api/config</code>.</div>
+      </div>
+    </div>
+
+    <!-- Node details modal -->
+    <div id="nodeModalBackdrop" class="backdrop hidden" aria-hidden="true"></div>
+    <div id="nodeModal" class="modal hidden node-modal" role="dialog" aria-modal="true" aria-label="Node Details">
+      <div class="modal-header">
+        <h3 id="nodeModalTitle">Node Details</h3>
+        <button id="btnCloseNodeModal" class="btn btn-secondary" type="button">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="muted" id="nodeDetailsMeta">—</div>
+        </div>
+        <div id="nodeDetails" class="kv">
+          <div class="muted">Loading…</div>
+        </div>
+        <div class="divider"></div>
+        <div class="node-chat">
+          <h4>Messaging</h4>
+          <div id="nodeMessages" class="messages compact"></div>
+          <form id="nodeSendForm" class="send">
+            <div class="field">
+              <label for="nodeSendText">Text</label>
+              <textarea id="nodeSendText" class="input" rows="3" required></textarea>
+            </div>
+            <div class="field">
+              <label for="nodeSendChannel">Channel</label>
+              <select id="nodeSendChannel" class="input">
+                <option value="">Auto (default)</option>
+              </select>
+              <div class="hint">Optional: choose a channel for this direct message.</div>
+            </div>
+            <div class="row">
+              <button class="btn btn-primary" type="submit">Send</button>
+              <div id="nodeSendResult" class="muted"></div>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
 
