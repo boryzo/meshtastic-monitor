@@ -4,6 +4,8 @@ import json
 import logging
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -57,6 +59,9 @@ class MeshService:
         nodes_refresh_sec: int = 5,
         max_messages: int = 200,
         stats_db: Optional[Any] = None,
+        mesh_http_port: int = 80,
+        status_ttl_sec: int = 5,
+        status_timeout_sec: float = 2.0,
     ) -> None:
         mesh_host = str(mesh_host or "").strip()
         mesh_port_int = int(mesh_port)
@@ -82,6 +87,9 @@ class MeshService:
         self._nodes_refresh_sec = max(1, int(nodes_refresh_sec))
         self._max_messages = max(1, int(max_messages))
         self._stats_db = stats_db
+        self._mesh_http_port = int(mesh_http_port) if int(mesh_http_port) > 0 else 80
+        self._status_ttl_sec = max(1, int(status_ttl_sec))
+        self._status_timeout_sec = max(0.5, float(status_timeout_sec))
 
         self._iface: Any = None
         self._iface_lock = threading.Lock()
@@ -94,6 +102,12 @@ class MeshService:
 
         self._channels_cache: List[Dict[str, Any]] = []
         self._channels_lock = threading.Lock()
+        self._status_lock = threading.Lock()
+        self._status_report: Optional[Dict[str, Any]] = None
+        self._status_report_status: Optional[str] = None
+        self._status_error: Optional[str] = None
+        self._status_fetched_at: Optional[int] = None
+        self._status_last_fetch: float = 0.0
 
         self._connected = False
         self._connected_lock = threading.Lock()
@@ -311,6 +325,74 @@ class MeshService:
             "metadata": metadata,
             "myInfo": my_info,
         }
+
+    def get_status_snapshot(self, *, force: bool = False) -> Dict[str, Any]:
+        now = time.time()
+        with self._status_lock:
+            fresh = self._status_fetched_at is not None and (now - self._status_last_fetch) < self._status_ttl_sec
+            if fresh and not force:
+                return self._status_snapshot()
+
+        report, status_text, err = self._fetch_status_report()
+        fetched_at = now_epoch()
+        ok = report is not None
+        if ok and self._stats_db is not None:
+            try:
+                self._stats_db.record_status_report(report)
+            except Exception:
+                pass
+
+        with self._status_lock:
+            self._status_report = report
+            self._status_report_status = status_text
+            self._status_error = err
+            self._status_fetched_at = fetched_at if ok else None
+            self._status_last_fetch = now
+            return self._status_snapshot()
+
+    def _status_snapshot(self) -> Dict[str, Any]:
+        return {
+            "ok": self._status_report is not None,
+            "report": self._status_report,
+            "status": self._status_report_status,
+            "error": self._status_error,
+            "fetchedAt": self._status_fetched_at,
+            "url": self._status_url(),
+        }
+
+    def _status_url(self) -> Optional[str]:
+        host = self._cfg.mesh_host
+        if not host:
+            return None
+        if self._mesh_http_port == 80:
+            return f"http://{host}/json/report"
+        return f"http://{host}:{self._mesh_http_port}/json/report"
+
+    def _fetch_status_report(self) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+        url = self._status_url()
+        if not url:
+            return None, None, "mesh host not configured"
+        try:
+            with urllib.request.urlopen(url, timeout=self._status_timeout_sec) as resp:
+                payload = resp.read()
+        except urllib.error.HTTPError as e:
+            return None, None, f"HTTP {e.code}"
+        except Exception as e:
+            return None, None, f"{type(e).__name__}: {e}"
+        try:
+            decoded = json.loads(payload.decode("utf-8", errors="ignore"))
+        except Exception as e:
+            return None, None, f"invalid JSON: {type(e).__name__}: {e}"
+
+        if not isinstance(decoded, dict):
+            return None, None, "invalid report (not an object)"
+        status_text = decoded.get("status")
+        report = decoded.get("data") if isinstance(decoded.get("data"), dict) else None
+        if report is None:
+            report = decoded
+        if not isinstance(report, dict):
+            return None, status_text if isinstance(status_text, str) else None, "invalid report (no data)"
+        return report, status_text if isinstance(status_text, str) else None, None
 
     # ---- actions
     def send_text(self, text: str, to: Optional[str] = None, channel: Optional[int] = None) -> None:
@@ -616,6 +698,9 @@ class FakeMeshService:
         self._channels: List[Dict[str, Any]] = []
         self._radio: Optional[Dict[str, Any]] = None
         self._device_config: Optional[Dict[str, Any]] = None
+        self._status_report: Optional[Dict[str, Any]] = None
+        self._status_report_status: Optional[str] = None
+        self._status_fetched_at: Optional[int] = None
         self.sent: List[Tuple[str, Optional[str], Optional[int]]] = []
 
     def start(self) -> None:  # noqa: D401
@@ -675,6 +760,16 @@ class FakeMeshService:
             return dict(self._device_config)
         return _redact_secrets(self._device_config)
 
+    def get_status_snapshot(self, *, force: bool = False) -> Dict[str, Any]:
+        return {
+            "ok": self._status_report is not None,
+            "report": self._status_report,
+            "status": self._status_report_status,
+            "error": None if self._status_report is not None else "status not available",
+            "fetchedAt": self._status_fetched_at,
+            "url": None,
+        }
+
     def send_text(self, text: str, to: Optional[str] = None, channel: Optional[int] = None) -> None:
         if not text:
             raise ValueError("text is required")
@@ -696,6 +791,11 @@ class FakeMeshService:
 
     def seed_device_config(self, cfg: Dict[str, Any]) -> None:
         self._device_config = dict(cfg)
+
+    def seed_status_report(self, report: Dict[str, Any], status: str = "ok") -> None:
+        self._status_report = dict(report)
+        self._status_report_status = status
+        self._status_fetched_at = now_epoch()
 
 
 def _channel_entry(index: int, channel: Any) -> Optional[Dict[str, Any]]:

@@ -86,6 +86,28 @@ def test_health(client):
     assert "lastError" in body
 
 
+def test_status_endpoint_returns_report():
+    svc = FakeMeshService()
+    svc.start()
+    svc.seed_status_report(
+        {
+            "power": {"battery_percent": 99, "battery_voltage_mv": 4100},
+            "wifi": {"ip": "192.168.1.10", "rssi": -65},
+        }
+    )
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.get("/api/status")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is True
+    assert body["reportOk"] is True
+    assert body["report"]["power"]["battery_percent"] == 99
+    assert body["report"]["wifi"]["ip"] == "192.168.1.10"
+
+
 def test_health_configured_false_when_mesh_host_empty():
     svc = FakeMeshService()
     svc.start()

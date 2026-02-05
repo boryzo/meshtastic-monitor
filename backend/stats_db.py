@@ -39,13 +39,21 @@ class StatsDB:
     Designed to be safe to call from multiple threads (single connection + lock).
     """
 
-    def __init__(self, path: str, *, nodes_history_interval_sec: int = 60) -> None:
+    def __init__(
+        self,
+        path: str,
+        *,
+        nodes_history_interval_sec: int = 60,
+        status_history_interval_sec: int = 60,
+    ) -> None:
         self.path = str(path)
         self._lock = threading.Lock()
         self._conn = self._connect(self.path)
         self._init_schema()
         self._nodes_history_interval_sec = max(0, int(nodes_history_interval_sec))
         self._last_nodes_history_ts: Optional[int] = None
+        self._status_history_interval_sec = max(0, int(status_history_interval_sec))
+        self._last_status_history_ts: Optional[int] = None
 
     def close(self) -> None:
         with self._lock:
@@ -346,6 +354,85 @@ class StatsDB:
                 )
                 self._last_nodes_history_ts = snapshot_ts
 
+    def record_status_report(self, report: Dict[str, Any]) -> None:
+        if not isinstance(report, dict):
+            return
+
+        ts = now_epoch()
+        if self._status_history_interval_sec > 0:
+            last_ts = self._last_status_history_ts
+            if last_ts is not None and ts - last_ts < self._status_history_interval_sec:
+                return
+
+        airtime = report.get("airtime") or {}
+        power = report.get("power") or {}
+        memory = report.get("memory") or {}
+        wifi = report.get("wifi") or {}
+        radio = report.get("radio") or {}
+        device = report.get("device") or {}
+
+        rx_log = airtime.get("rx_log") if isinstance(airtime, dict) else None
+        tx_log = airtime.get("tx_log") if isinstance(airtime, dict) else None
+        rx_all_log = airtime.get("rx_all_log") if isinstance(airtime, dict) else None
+
+        def first_list(val: Any) -> Optional[int]:
+            if isinstance(val, (list, tuple)) and val:
+                return _to_int_or_none(val[0])
+            return None
+
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO status_reports(
+                  ts,
+                  channel_utilization,
+                  utilization_tx,
+                  seconds_since_boot,
+                  rx_log,
+                  tx_log,
+                  rx_all_log,
+                  battery_percent,
+                  battery_voltage_mv,
+                  is_charging,
+                  has_usb,
+                  has_battery,
+                  heap_free,
+                  heap_total,
+                  fs_free,
+                  fs_total,
+                  wifi_rssi,
+                  wifi_ip,
+                  radio_frequency,
+                  lora_channel,
+                  reboot_counter
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    _to_float_or_none(airtime.get("channel_utilization")),
+                    _to_float_or_none(airtime.get("utilization_tx")),
+                    _to_int_or_none(airtime.get("seconds_since_boot")),
+                    first_list(rx_log),
+                    first_list(tx_log),
+                    first_list(rx_all_log),
+                    _to_float_or_none(power.get("battery_percent")),
+                    _to_int_or_none(power.get("battery_voltage_mv")),
+                    _bool_to_int(power.get("is_charging")),
+                    _bool_to_int(power.get("has_usb")),
+                    _bool_to_int(power.get("has_battery")),
+                    _to_int_or_none(memory.get("heap_free")),
+                    _to_int_or_none(memory.get("heap_total")),
+                    _to_int_or_none(memory.get("fs_free")),
+                    _to_int_or_none(memory.get("fs_total")),
+                    _to_int_or_none(wifi.get("rssi")),
+                    _to_str_or_none(wifi.get("ip")),
+                    _to_float_or_none(radio.get("frequency")),
+                    _to_int_or_none(radio.get("lora_channel")),
+                    _to_int_or_none(device.get("reboot_counter")),
+                ),
+            )
+            self._last_status_history_ts = ts
+
     def known_node_entries(self) -> List[Dict[str, Any]]:
         now = now_epoch()
         with self._lock:
@@ -441,6 +528,87 @@ class StatsDB:
                 "quality": r["quality"],
                 "hopsAway": r["hops_away"],
                 "lastHeard": r["last_heard"],
+            }
+            for r in rows
+        ]
+
+    def list_status_reports(
+        self,
+        *,
+        limit: int = 200,
+        since: Optional[int] = None,
+        order: str = "desc",
+    ) -> List[Dict[str, Any]]:
+        limit = int(limit)
+        order_dir = "DESC" if str(order).lower() == "desc" else "ASC"
+        params: List[Any] = []
+        where: List[str] = []
+
+        if since is not None:
+            where.append("ts >= ?")
+            params.append(int(since))
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        limit_sql = "" if limit <= 0 else "LIMIT ?"
+        if limit > 0:
+            params.append(int(limit))
+
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT
+                  ts,
+                  channel_utilization,
+                  utilization_tx,
+                  seconds_since_boot,
+                  rx_log,
+                  tx_log,
+                  rx_all_log,
+                  battery_percent,
+                  battery_voltage_mv,
+                  is_charging,
+                  has_usb,
+                  has_battery,
+                  heap_free,
+                  heap_total,
+                  fs_free,
+                  fs_total,
+                  wifi_rssi,
+                  wifi_ip,
+                  radio_frequency,
+                  lora_channel,
+                  reboot_counter
+                FROM status_reports
+                {where_sql}
+                ORDER BY ts {order_dir}, id {order_dir}
+                {limit_sql}
+                """,
+                tuple(params),
+            ).fetchall()
+
+        return [
+            {
+                "ts": int(r["ts"]),
+                "channelUtilization": r["channel_utilization"],
+                "utilizationTx": r["utilization_tx"],
+                "secondsSinceBoot": r["seconds_since_boot"],
+                "rxLog": r["rx_log"],
+                "txLog": r["tx_log"],
+                "rxAllLog": r["rx_all_log"],
+                "batteryPercent": r["battery_percent"],
+                "batteryVoltageMv": r["battery_voltage_mv"],
+                "isCharging": _bool_from_int(r["is_charging"]),
+                "hasUsb": _bool_from_int(r["has_usb"]),
+                "hasBattery": _bool_from_int(r["has_battery"]),
+                "heapFree": r["heap_free"],
+                "heapTotal": r["heap_total"],
+                "fsFree": r["fs_free"],
+                "fsTotal": r["fs_total"],
+                "wifiRssi": r["wifi_rssi"],
+                "wifiIp": r["wifi_ip"],
+                "radioFrequency": r["radio_frequency"],
+                "loraChannel": r["lora_channel"],
+                "rebootCounter": r["reboot_counter"],
             }
             for r in rows
         ]
@@ -667,6 +835,37 @@ class StatsDB:
             )
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_rx_time ON messages(rx_time)"
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS status_reports (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ts INTEGER NOT NULL,
+                  channel_utilization REAL,
+                  utilization_tx REAL,
+                  seconds_since_boot INTEGER,
+                  rx_log INTEGER,
+                  tx_log INTEGER,
+                  rx_all_log INTEGER,
+                  battery_percent REAL,
+                  battery_voltage_mv INTEGER,
+                  is_charging INTEGER,
+                  has_usb INTEGER,
+                  has_battery INTEGER,
+                  heap_free INTEGER,
+                  heap_total INTEGER,
+                  fs_free INTEGER,
+                  fs_total INTEGER,
+                  wifi_rssi INTEGER,
+                  wifi_ip TEXT,
+                  radio_frequency REAL,
+                  lora_channel INTEGER,
+                  reboot_counter INTEGER
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_status_reports_ts ON status_reports(ts)"
             )
 
     def _ensure_node_counts_columns(self) -> None:

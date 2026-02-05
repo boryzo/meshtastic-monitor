@@ -148,6 +148,9 @@ body {
   grid-template-columns: 140px 1fr;
   gap: 8px 14px;
 }
+.kv.two-col {
+  grid-template-columns: repeat(2, 120px 1fr);
+}
 .kv .k {
   font-size: 12px;
   text-transform: uppercase;
@@ -537,6 +540,21 @@ textarea.input {
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
+.status-meta {
+  padding: 0 14px 8px;
+}
+.status-grid {
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+}
 .panel {
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
@@ -608,5 +626,11 @@ textarea.input {
   }
   .col-snr {
     width: auto;
+  }
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+  .kv.two-col {
+    grid-template-columns: 120px 1fr;
   }
 }

@@ -51,7 +51,7 @@ function fmtTime(epoch) {
 }
 let activeNodesTab = "direct";
 let lastMessagesKey = "";
-let lastHealth = null;
+let lastStatus = null;
 let channelsByIndex = new Map();
 let channelsVersion = 0;
 let lastMessageFp = null;
@@ -305,12 +305,12 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-async function tickHealth() {
+async function tickStatus() {
   try {
-    const h = await apiFetch("/api/health");
-    lastHealth = h;
+    const h = await apiFetch("/api/status");
+    lastStatus = h;
     if (h.transport === "mqtt") {
-      $("meshHost").textContent = `MQTT ${h.mqttHost}:${h.mqttPort}`;
+      $("meshHost").textContent = `MQTT ${h.mqttHost || "—"}:${h.mqttPort || "—"}`;
     } else if (h.meshHost) {
       $("meshHost").textContent = `${h.meshHost}:${h.meshPort}`;
     } else {
@@ -325,41 +325,98 @@ async function tickHealth() {
     } else {
       setConnStatus(h.connected);
     }
-    renderHealth(h);
+    renderStatus(h);
   } catch (e) {
     $("meshHost").textContent = "—";
     setConnStatus(false);
-    renderHealthError(e);
+    renderStatusError(e);
   }
 }
-function renderHealth(h) {
+function renderStatus(h) {
   const statusText =
     h.configured === false ? "Not configured" : h.connected ? "Connected" : "Disconnected";
-  const rows = [];
-  rows.push(kv("Status", statusText));
-  rows.push(kv("Transport", String(h.transport || "—")));
-  if (h.transport === "mqtt") {
-    rows.push(kv("MQTT", `${h.mqttHost || "—"}:${h.mqttPort || "—"}`));
-    rows.push(kv("MQTT TLS", h.mqttTls ? "true" : "false"));
-    rows.push(kv("MQTT User", h.mqttUsername || "—"));
-    rows.push(kv("MQTT Topic", h.mqttRootTopic || "—"));
-  } else {
-    rows.push(kv("Mesh", h.meshHost ? `${h.meshHost}:${h.meshPort}` : "—"));
+  const overview = [];
+  overview.push(kv("Connection", statusText));
+  overview.push(kv("Transport", String(h.transport || "—")));
+  overview.push(kv("Mesh", h.meshHost ? `${h.meshHost}:${h.meshPort}` : "—"));
+  overview.push(kv("Report", h.reportOk ? (h.reportStatus || "ok") : "unavailable"));
+  if (h.reportUrl) overview.push(kv("URL", h.reportUrl));
+  if (h.lastError) overview.push(kv("Last error", String(h.lastError), true));
+  $("statusOverview").innerHTML = overview.join("");
+
+  const updated = h.reportFetchedAt
+    ? new Date(h.reportFetchedAt * 1000).toLocaleTimeString()
+    : "—";
+  $("statusMeta").textContent = `updated ${updated}`;
+  $("statusError").textContent = h.reportOk
+    ? ""
+    : h.reportError
+      ? `Report error: ${h.reportError}`
+      : "Report unavailable";
+
+  if (!h.report) {
+    ["statusPower", "statusMemory", "statusAirtime", "statusRadio", "statusWifi"].forEach(
+      (id) => {
+        const el = $(id);
+        if (el) el.innerHTML = `<div class="muted">No report yet</div>`;
+      }
+    );
+    $("healthJson").textContent = JSON.stringify(h, null, 2);
+    return;
   }
-  if (h.lastError) {
-    rows.push(kv("Last error", String(h.lastError), true));
-  }
-  rows.push(
-    kv(
-      "Updated",
-      h.generatedAt ? new Date(h.generatedAt * 1000).toLocaleTimeString() : "—"
-    )
-  );
-  $("healthDetails").innerHTML = rows.join("");
+
+  const airtime = h.report.airtime || {};
+  const power = h.report.power || {};
+  const memory = h.report.memory || {};
+  const wifi = h.report.wifi || {};
+  const radio = h.report.radio || {};
+  const device = h.report.device || {};
+
+  $("statusPower").innerHTML = [
+    kv("Battery", fmtPercent(power.battery_percent, 0)),
+    kv("Voltage", fmtVoltageMv(power.battery_voltage_mv)),
+    kv("Charging", fmtBoolish(power.is_charging)),
+    kv("USB", fmtBoolish(power.has_usb)),
+    kv("Has battery", fmtBoolish(power.has_battery)),
+  ].join("");
+
+  $("statusMemory").innerHTML = [
+    kv("Heap", fmtBytesPair(memory.heap_free, memory.heap_total)),
+    kv("FS", fmtBytesPair(memory.fs_free, memory.fs_total)),
+    kv("PSRAM", fmtBytesPair(memory.psram_free, memory.psram_total)),
+  ].join("");
+
+  $("statusAirtime").innerHTML = [
+    kv("Channel util", fmtPercent(airtime.channel_utilization, 1)),
+    kv("Util TX", fmtPercent(airtime.utilization_tx, 2)),
+    kv("RX log", fmtCount(firstListVal(airtime.rx_log))),
+    kv("TX log", fmtCount(firstListVal(airtime.tx_log))),
+    kv("RX all", fmtCount(firstListVal(airtime.rx_all_log))),
+    kv("Uptime", fmtAge(airtime.seconds_since_boot)),
+  ].join("");
+
+  $("statusRadio").innerHTML = [
+    kv("Frequency", fmtNum(radio.frequency, 3)),
+    kv("LoRa channel", radio.lora_channel ?? "—"),
+    kv("Reboots", fmtCount(device.reboot_counter)),
+  ].join("");
+
+  $("statusWifi").innerHTML = [
+    kv("IP", wifi.ip || "—"),
+    kv("RSSI", wifi.rssi ?? "—"),
+  ].join("");
+
   $("healthJson").textContent = JSON.stringify(h, null, 2);
 }
-function renderHealthError(e) {
-  $("healthDetails").innerHTML = `<div class="muted">Failed to load: ${escapeHtml(e.message)}</div>`;
+function renderStatusError(e) {
+  ["statusOverview", "statusPower", "statusMemory", "statusAirtime", "statusRadio", "statusWifi"].forEach(
+    (id) => {
+      const el = $(id);
+      if (el) el.innerHTML = `<div class="muted">Failed to load</div>`;
+    }
+  );
+  $("statusError").textContent = e.message ? `Failed to load: ${e.message}` : "Failed to load";
+  $("statusMeta").textContent = "—";
   $("healthJson").textContent = "";
 }
 function kv(key, value, isErr = false) {
@@ -371,10 +428,59 @@ function fmtNum(val, digits = 2) {
   if (Number.isNaN(n)) return "—";
   return n.toFixed(digits);
 }
+function fmtPercent(val, digits = 1) {
+  if (val === null || val === undefined) return "—";
+  const n = Number(val);
+  if (Number.isNaN(n)) return "—";
+  return `${n.toFixed(digits)}%`;
+}
+function fmtVoltageMv(val) {
+  if (val === null || val === undefined) return "—";
+  const n = Number(val);
+  if (Number.isNaN(n)) return "—";
+  return `${(n / 1000).toFixed(2)} V`;
+}
+function fmtBytes(val) {
+  if (val === null || val === undefined) return "—";
+  const n = Number(val);
+  if (Number.isNaN(n)) return "—";
+  if (n < 1024) return `${n.toFixed(0)} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(2)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(2)} GB`;
+}
+function fmtBytesPair(free, total) {
+  const f = fmtBytes(free);
+  const t = fmtBytes(total);
+  if (f === "—" && t === "—") return "—";
+  if (t === "—") return f;
+  if (f === "—") return `— / ${t}`;
+  return `${f} / ${t}`;
+}
 function fmtBool(val) {
   if (val === true) return "true";
   if (val === false) return "false";
   return "—";
+}
+function fmtBoolish(val) {
+  if (val === true || val === false) return fmtBool(val);
+  if (typeof val === "string") {
+    const v = val.trim().toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(v)) return "true";
+    if (["0", "false", "no", "n", "off"].includes(v)) return "false";
+  }
+  if (typeof val === "number") {
+    if (Number.isNaN(val)) return "—";
+    return val === 0 ? "false" : "true";
+  }
+  return "—";
+}
+function firstListVal(val) {
+  if (!Array.isArray(val) || val.length === 0) return null;
+  return val[0];
 }
 function fmtCount(val) {
   if (val === null || val === undefined) return "0";
@@ -560,8 +666,7 @@ function renderNodeMessages(nodeId) {
     list.innerHTML = `<div class="muted">No messages for this node yet.</div>`;
     return;
   }
-  const recent = filtered.slice(-50);
-  const rows = recent.map((m) => {
+  const rows = filtered.map((m) => {
     const from = m.fromId || "—";
     const to = m.toId || "—";
     const snr = m.snr === null || m.snr === undefined ? "—" : String(m.snr);
@@ -804,6 +909,54 @@ function renderBars(hourly) {
   });
   el.innerHTML = bars.join("");
 }
+function renderSeriesBars(elId, series, valueKey, formatLabel) {
+  const el = $(elId);
+  if (!el) return;
+  if (!Array.isArray(series) || series.length === 0) {
+    el.innerHTML = `<div class="muted">No data</div>`;
+    return;
+  }
+  const points = series
+    .map((s) => {
+      const v = Number(s[valueKey]);
+      return { ts: s.ts, value: Number.isFinite(v) ? v : null };
+    })
+    .filter((p) => p.value !== null);
+  if (!points.length) {
+    el.innerHTML = `<div class="muted">No data</div>`;
+    return;
+  }
+  const min = Math.min(...points.map((p) => p.value));
+  const max = Math.max(...points.map((p) => p.value));
+  const span = max - min || 1;
+  const bars = points.map((p) => {
+    const norm = (p.value - min) / span;
+    const height = 10 + Math.round(norm * 50);
+    const label = p.ts ? new Date(p.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    const valueLabel = formatLabel(p.value);
+    const title = `${label} • ${valueLabel}`;
+    return `<div class="bar" style="height:${height}px" title="${escapeHtml(title)}">
+      <span>${escapeHtml(valueLabel)}</span>
+    </div>`;
+  });
+  el.innerHTML = bars.join("");
+}
+function renderStatusSummary(latest) {
+  const el = $("statsStatusSummary");
+  if (!el) return;
+  if (!latest) {
+    el.innerHTML = `<div class="muted">No status data yet</div>`;
+    return;
+  }
+  const rows = [];
+  rows.push(kv("Battery", fmtPercent(latest.batteryPercent, 0)));
+  rows.push(kv("Channel util", fmtPercent(latest.channelUtilization, 1)));
+  rows.push(kv("Util TX", fmtPercent(latest.utilizationTx, 2)));
+  rows.push(kv("WiFi RSSI", latest.wifiRssi ?? "—"));
+  rows.push(kv("Heap free", fmtBytes(latest.heapFree)));
+  rows.push(kv("FS free", fmtBytes(latest.fsFree)));
+  el.innerHTML = rows.join("");
+}
 function renderList(elId, items, formatter, emptyText) {
   const el = $(elId);
   if (!el) return;
@@ -817,7 +970,19 @@ function renderStats(data) {
   if (!data || data.ok === false) {
     $("statsMeta").textContent = data && data.error ? data.error : "Stats disabled";
     $("statsSummary").innerHTML = `<div class="muted">Stats disabled</div>`;
-    ["statsHourly", "statsNodesVisible", "statsApps", "statsAppRequests", "statsTopFrom", "statsTopTo", "statsEvents"].forEach(
+    [
+      "statsHourly",
+      "statsNodesVisible",
+      "statsApps",
+      "statsAppRequests",
+      "statsTopFrom",
+      "statsTopTo",
+      "statsEvents",
+      "statsStatusSummary",
+      "statsBattery",
+      "statsChannelUtil",
+      "statsWifiRssi",
+    ].forEach(
       (id) => {
         const el = $(id);
         if (el) el.innerHTML = "";
@@ -825,7 +990,16 @@ function renderStats(data) {
     );
     return;
   }
-  const key = JSON.stringify([data.generatedAt, data.counters, data.messages, data.apps, data.nodes, data.events]);
+  const statusKey = data.status && data.status.latest ? data.status.latest.ts : null;
+  const key = JSON.stringify([
+    data.generatedAt,
+    data.counters,
+    data.messages,
+    data.apps,
+    data.nodes,
+    data.events,
+    statusKey,
+  ]);
   if (key === lastStatsKey) return;
   lastStatsKey = key;
   const counters = data.counters || {};
@@ -833,6 +1007,7 @@ function renderStats(data) {
   const apps = data.apps || {};
   const nodes = data.nodes || {};
   const events = data.events || [];
+  const status = data.status || {};
   const updated = data.generatedAt
     ? new Date(data.generatedAt * 1000).toLocaleTimeString()
     : "—";
@@ -872,6 +1047,10 @@ function renderStats(data) {
   $("statsSummary").innerHTML = summary;
   renderNodesVisibleHistory();
   renderBars(messages.hourlyWindow || []);
+  renderStatusSummary(status.latest);
+  renderSeriesBars("statsBattery", status.series || [], "batteryPercent", (v) => `${v.toFixed(0)}%`);
+  renderSeriesBars("statsChannelUtil", status.series || [], "channelUtilization", (v) => `${v.toFixed(1)}%`);
+  renderSeriesBars("statsWifiRssi", status.series || [], "wifiRssi", (v) => `${v.toFixed(0)}`);
   renderList(
     "statsApps",
     apps.counts || [],
@@ -1087,7 +1266,7 @@ async function saveSettings() {
     } else {
       showToast("ok", `Applied TCP: ${meshHost}:${meshPort || "4403"}`);
     }
-    await tickHealth();
+    await tickStatus();
     await tickNodes();
   } catch (e) {
     showToast("err", `Failed to apply settings: ${e.message}`);
@@ -1106,14 +1285,14 @@ function downloadJson(obj, filename) {
   URL.revokeObjectURL(url);
 }
 async function copyHealthJson() {
-  if (!lastHealth) {
-    showToast("err", "Health not loaded yet");
+  if (!lastStatus) {
+    showToast("err", "Status not loaded yet");
     return;
   }
-  const text = JSON.stringify(lastHealth, null, 2);
+  const text = JSON.stringify(lastStatus, null, 2);
   try {
     await navigator.clipboard.writeText(text);
-    showToast("ok", "Copied health JSON");
+    showToast("ok", "Copied status JSON");
   } catch {
     // Fallback
     const ta = document.createElement("textarea");
@@ -1122,7 +1301,7 @@ async function copyHealthJson() {
     ta.select();
     document.execCommand("copy");
     ta.remove();
-    showToast("ok", "Copied health JSON");
+    showToast("ok", "Copied status JSON");
   }
 }
 function toggleHealthJson() {
@@ -1345,14 +1524,14 @@ function init() {
     unreadCount = 0;
     updateTitle();
   });
-  tickHealth();
+  tickStatus();
   tickNodes();
   tickChannels();
   tickRadio();
   tickMessages();
   tickStats();
   if (lastNodeDetailsId) loadNodeDetails(lastNodeDetailsId);
-  window.setInterval(tickHealth, 2500);
+  window.setInterval(tickStatus, 2500);
   window.setInterval(tickNodes, 5000);
   window.setInterval(tickChannels, 15000);
   window.setInterval(tickRadio, 5000);

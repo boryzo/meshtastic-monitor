@@ -93,7 +93,12 @@ def create_app(
             stats_path = os.getenv("STATS_DB_PATH", "meshmon.db").strip()
             if stats_path.lower() not in {"", "off", "none", "disabled"}:
                 history_interval = _get_env_int("NODES_HISTORY_INTERVAL_SEC", 60)
-                stats_db = StatsDB(stats_path, nodes_history_interval_sec=history_interval)
+                status_interval = _get_env_int("STATUS_HISTORY_INTERVAL_SEC", 60)
+                stats_db = StatsDB(
+                    stats_path,
+                    nodes_history_interval_sec=history_interval,
+                    status_history_interval_sec=status_interval,
+                )
         mesh_service = MeshService(
             mesh_host,
             mesh_port,
@@ -107,6 +112,8 @@ def create_app(
             nodes_refresh_sec=nodes_refresh_sec,
             max_messages=max_messages,
             stats_db=stats_db,
+            mesh_http_port=_get_env_int("MESH_HTTP_PORT", 80),
+            status_ttl_sec=_get_env_int("STATUS_TTL_SEC", 5),
         )
         mesh_service.start()
     # --- frontend routes
@@ -133,6 +140,47 @@ def create_app(
                 "mqttPasswordSet": bool(cfg.mqtt_password),
                 "connected": bool(mesh_service.is_connected()),
                 "lastError": mesh_service.last_error(),
+                "generatedAt": now_epoch(),
+            }
+        )
+    @app.get("/api/status")
+    def api_status():
+        cfg = mesh_service.get_config()
+        configured = _is_configured(cfg)
+        status = None
+        getter = getattr(mesh_service, "get_status_snapshot", None)
+        if callable(getter):
+            try:
+                status = getter()
+            except Exception:
+                status = None
+        report_ok = bool(status.get("ok")) if isinstance(status, dict) else False
+        report = status.get("report") if isinstance(status, dict) else None
+        report_status = status.get("status") if isinstance(status, dict) else None
+        report_error = status.get("error") if isinstance(status, dict) else None
+        report_fetched_at = status.get("fetchedAt") if isinstance(status, dict) else None
+        report_url = status.get("url") if isinstance(status, dict) else None
+        return jsonify(
+            {
+                "ok": True,
+                "transport": cfg.transport,
+                "configured": configured,
+                "meshHost": (cfg.mesh_host or None),
+                "meshPort": cfg.mesh_port,
+                "mqttHost": cfg.mqtt_host,
+                "mqttPort": cfg.mqtt_port,
+                "mqttUsername": cfg.mqtt_username,
+                "mqttTls": bool(cfg.mqtt_tls),
+                "mqttRootTopic": cfg.mqtt_root_topic,
+                "mqttPasswordSet": bool(cfg.mqtt_password),
+                "connected": bool(mesh_service.is_connected()),
+                "lastError": mesh_service.last_error(),
+                "reportOk": report_ok,
+                "reportStatus": report_status,
+                "report": report,
+                "reportError": report_error,
+                "reportFetchedAt": report_fetched_at,
+                "reportUrl": report_url,
                 "generatedAt": now_epoch(),
             }
         )
@@ -357,6 +405,14 @@ def create_app(
         summary = stats_db.summary(hours=hours, local_node_id=local_id)
         cfg = mesh_service.get_config()
         configured = _is_configured(cfg)
+        status_series = []
+        status_latest = None
+        try:
+            status_series = stats_db.list_status_reports(limit=120, order="asc")
+            if status_series:
+                status_latest = status_series[-1]
+        except Exception:
+            status_series = []
         return jsonify(
             {
                 "ok": True,
@@ -386,6 +442,10 @@ def create_app(
                     "topTo": summary.top_to,
                 },
                 "events": summary.recent_events,
+                "status": {
+                    "latest": status_latest,
+                    "series": status_series,
+                },
             }
         )
     @app.post("/api/send")

@@ -40,15 +40,40 @@
             <a
               id="btnOpenHealthJson"
               class="btn btn-secondary"
-              href="/api/health"
+              href="/api/status"
               target="_blank"
               rel="noreferrer"
               >Open JSON</a
             >
           </div>
         </div>
-        <div id="healthDetails" class="kv">
-          <div class="muted">Loading…</div>
+        <div class="status-meta muted" id="statusMeta">Loading…</div>
+        <div id="statusError" class="muted"></div>
+        <div class="status-grid">
+          <div class="panel">
+            <h3>Overview</h3>
+            <div id="statusOverview" class="kv"></div>
+          </div>
+          <div class="panel">
+            <h3>Power</h3>
+            <div id="statusPower" class="kv"></div>
+          </div>
+          <div class="panel">
+            <h3>Memory</h3>
+            <div id="statusMemory" class="kv"></div>
+          </div>
+          <div class="panel">
+            <h3>Airtime</h3>
+            <div id="statusAirtime" class="kv"></div>
+          </div>
+          <div class="panel">
+            <h3>Radio</h3>
+            <div id="statusRadio" class="kv"></div>
+          </div>
+          <div class="panel">
+            <h3>WiFi</h3>
+            <div id="statusWifi" class="kv"></div>
+          </div>
         </div>
         <pre id="healthJson" class="code hidden"></pre>
       </section>
@@ -150,6 +175,22 @@
           <div class="panel wide">
             <h3>Messages (hourly)</h3>
             <div id="statsHourly" class="bars"></div>
+          </div>
+          <div class="panel wide">
+            <h3>Status (latest)</h3>
+            <div id="statsStatusSummary" class="kv"></div>
+          </div>
+          <div class="panel wide">
+            <h3>Battery % (recent)</h3>
+            <div id="statsBattery" class="bars"></div>
+          </div>
+          <div class="panel wide">
+            <h3>Channel Utilization (recent)</h3>
+            <div id="statsChannelUtil" class="bars"></div>
+          </div>
+          <div class="panel wide">
+            <h3>WiFi RSSI (recent)</h3>
+            <div id="statsWifiRssi" class="bars"></div>
           </div>
           <div class="panel">
             <h3>Apps</h3>
@@ -285,7 +326,7 @@
         <div class="row">
           <div class="muted" id="nodeDetailsMeta">—</div>
         </div>
-        <div id="nodeDetails" class="kv">
+        <div id="nodeDetails" class="kv two-col">
           <div class="muted">Loading…</div>
         </div>
         <div class="divider"></div>

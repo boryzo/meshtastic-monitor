@@ -369,3 +369,33 @@ def test_stats_db_schema_migration_adds_columns(tmp_path):
 
     for col in ["short", "long", "role", "hw_model", "firmware", "hops_away", "last_heard"]:
         assert col in cols
+
+
+def test_stats_db_records_status_report():
+    db = StatsDB(":memory:", status_history_interval_sec=0)
+    db.record_status_report(
+        {
+            "airtime": {
+                "channel_utilization": 13.2149991989136,
+                "seconds_since_boot": 1253,
+                "rx_all_log": [6581],
+                "rx_log": [97426],
+                "tx_log": [10361],
+                "utilization_tx": 0.287805557250977,
+            },
+            "device": {"reboot_counter": 58},
+            "memory": {"fs_free": 1019904, "fs_total": 1048576, "heap_free": 35488, "heap_total": 281216},
+            "power": {"battery_percent": 100, "battery_voltage_mv": 4325, "has_battery": True, "has_usb": True, "is_charging": True},
+            "radio": {"frequency": 869.525024414062, "lora_channel": 1},
+            "wifi": {"ip": "192.168.8.137", "rssi": -68},
+        }
+    )
+    items = db.list_status_reports(limit=10, order="asc")
+    assert items
+    latest = items[-1]
+    assert latest["batteryPercent"] == 100
+    assert latest["batteryVoltageMv"] == 4325
+    assert latest["channelUtilization"] == 13.2149991989136
+    assert latest["utilizationTx"] == 0.287805557250977
+    assert latest["wifiIp"] == "192.168.8.137"
+    assert latest["wifiRssi"] == -68
