@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -31,6 +31,28 @@ jobs:
           rm -rf dist build *.egg-info
           python -m build
           python -m twine check dist/*
+
+      - name: Verify tag matches version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python - <<'PY'
+          import configparser
+          
+          cfg = configparser.ConfigParser()
+          cfg.read("setup.cfg")
+          version = cfg["metadata"]["version"].strip()
+          
+          tag = "${{ github.ref_name }}".strip()
+          tag_version = tag[1:] if tag.startswith("v") else tag
+          
+          if version != tag_version:
+              raise SystemExit(
+                  f"setup.cfg version {version!r} does not match tag {tag_version!r}. "
+                  "Fix setup.cfg or retag before releasing."
+              )
+          
+          print(f"OK: version {version} matches tag {tag}")
+          PY
 
       - name: Show wheel metadata
         run: |
@@ -62,3 +84,11 @@ jobs:
       - name: Publish (Trusted Publishing)
         if: ${{ env.PYPI_API_TOKEN == '' }}
         uses: pypa/gh-action-pypi-publish@v1.9.0
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*

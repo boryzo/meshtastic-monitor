@@ -31,4 +31,8 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The `Publish` workflow will build and upload to PyPI automatically.
+The `Publish` workflow will:
+
+- build + `twine check`
+- upload to PyPI (token or Trusted Publishing)
+- create a GitHub Release automatically (with attached `dist/*`)
