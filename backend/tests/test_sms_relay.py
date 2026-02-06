@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import io
+import urllib.error
+import urllib.parse
+
+import backend.sms_relay as sms_relay
+
+
+class _ImmediateThread:
+    def __init__(self, target, daemon=None):  # noqa: D401, ANN001
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
+class _DummyResponse:
+    def __init__(self, status: int = 200, body: bytes = b"OK") -> None:
+        self.status = status
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):  # noqa: ANN001
+        return self
+
+    def __exit__(self, exc_type, exc, tb):  # noqa: ANN001
+        return False
+
+
+def _freeze_time(monkeypatch, values):
+    it = iter(values)
+    monkeypatch.setattr(sms_relay.time, "time", lambda: next(it))
+
+
+def test_sms_relay_sends_and_logs_without_url_or_key(monkeypatch, caplog):
+    api_url = "https://sms.example/send"
+    api_key = "SECRETKEY"
+    phone = "600000000"
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        assert api_key in url
+        assert api_url in url
+        return _DummyResponse(status=200, body=b"OK")
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+    _freeze_time(monkeypatch, [1000.0, 1000.25])
+
+    relay = sms_relay.SmsRelay(
+        enabled=True,
+        api_url=api_url,
+        api_key=api_key,
+        phone=phone,
+        timeout_sec=2.0,
+    )
+
+    caplog.set_level("INFO")
+    relay.send_message({"fromId": "!a", "toId": "!b", "text": "hello"})
+
+    log_text = "\n".join(r.message for r in caplog.records)
+    assert "SMS relay sent" in log_text
+    assert api_url not in log_text
+    assert api_key not in log_text
+
+
+def test_sms_relay_redacts_key_from_response(monkeypatch, caplog):
+    api_url = "https://sms.example/send"
+    api_key = "SECRETKEY"
+    phone = "600000000"
+    encoded = urllib.parse.quote_plus(api_key)
+    body = f"ok key={api_key} enc={encoded}".encode("utf-8")
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        return _DummyResponse(status=200, body=body)
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+    _freeze_time(monkeypatch, [1000.0, 1000.1])
+
+    relay = sms_relay.SmsRelay(
+        enabled=True,
+        api_url=api_url,
+        api_key=api_key,
+        phone=phone,
+    )
+
+    caplog.set_level("INFO")
+    relay.send_message({"fromId": "!a", "toId": "!b", "text": "hello"})
+
+    log_text = "\n".join(r.message for r in caplog.records)
+    assert "SMS relay sent" in log_text
+    assert api_key not in log_text
+    assert encoded not in log_text
+
+
+def test_sms_relay_http_error_logs_without_key(monkeypatch, caplog):
+    api_url = "https://sms.example/send"
+    api_key = "SECRETKEY"
+    phone = "600000000"
+    body = f"err {api_key}".encode("utf-8")
+
+    err = urllib.error.HTTPError(
+        api_url,
+        500,
+        "server error",
+        hdrs=None,
+        fp=io.BytesIO(body),
+    )
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        raise err
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+    _freeze_time(monkeypatch, [1000.0, 1000.2])
+
+    relay = sms_relay.SmsRelay(
+        enabled=True,
+        api_url=api_url,
+        api_key=api_key,
+        phone=phone,
+    )
+
+    caplog.set_level("WARNING")
+    relay.send_message({"fromId": "!a", "toId": "!b", "text": "hello"})
+
+    log_text = "\n".join(r.message for r in caplog.records)
+    assert "SMS relay failed" in log_text
+    assert api_key not in log_text
+
+
+def test_sms_relay_disabled_does_not_call_gateway(monkeypatch):
+    called = {"ok": False}
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        called["ok"] = True
+        return _DummyResponse()
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+
+    relay = sms_relay.SmsRelay(enabled=False, api_url="x", api_key="y", phone="z")
+    relay.send_message({"fromId": "!a", "toId": "!b", "text": "hello"})
+
+    assert called["ok"] is False
