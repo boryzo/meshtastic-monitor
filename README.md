@@ -42,6 +42,19 @@ If you run this on another computer in your LAN, open:
 
 - `http://SERVER_IP:8880/`
 
+### 2a) Config file (created automatically)
+
+On first run, a config file is created in the current folder:
+
+- `./meshmon.ini`
+
+This file stores your **mesh host/port** and optional **SMS relay** settings.
+You can also choose a custom path:
+
+```bash
+python -m meshtastic_monitor --config /path/to/meshmon.ini
+```
+
 ### 3) Stop
 
 Press `Ctrl+C` in the terminal where it is running.
@@ -53,7 +66,21 @@ Press `Ctrl+C` in the terminal where it is running.
 3. Put your Meshtastic IP/host + port (`4403`)
 4. Click **Save & Apply**
 
-The UI stores these settings in your browser (`localStorage`).
+The UI stores these settings in your browser (`localStorage`) and the backend config file
+(`meshmon.ini`) when started via `python -m meshtastic_monitor`.
+
+### SMS relay (optional)
+
+If you want **every incoming packet** forwarded via SMS, configure it in Settings:
+
+- Enable **SMS relay**
+- Set **SMS API URL**, **API key**, and **Phone**
+
+Example API format:
+
+```
+https://your-sms-gateway.example/api?api_key=YOUR_KEY&phone=604632342&message=hello
+```
 
 ## Command-line options (copy/paste)
 
@@ -71,6 +98,11 @@ Most used:
 - `--log-file` (default `./meshmon.log`)
 - `--log-level` (default `INFO`)
 - `--nodes-history-interval` (default `60` seconds)
+- `--config` (path to `meshmon.ini`)
+- `--sms-enabled` / `--sms-disabled`
+- `--sms-api-url`
+- `--sms-api-key`
+- `--sms-phone`
 
 You can also set env vars instead of flags:
 
@@ -87,6 +119,12 @@ You can also set env vars instead of flags:
 - `STATUS_TTL_SEC` (default `5`) cache `/json/report` for this many seconds
 - `LOG_LEVEL` (default `INFO`)
 - `MESHMON_LOG_FILE` (default `./meshmon.log`)
+- `MESHMON_CONFIG` (path to `meshmon.ini`)
+- `SMS_ENABLED` (`1`/`0`)
+- `SMS_API_URL` (base URL, e.g. `https://your-sms-gateway.example/api`)
+- `SMS_API_KEY`
+- `SMS_PHONE`
+- `SMS_TIMEOUT_SEC` (seconds, default `4`)
 
 ## Logs (where are they?)
 
@@ -121,6 +159,7 @@ Logs are rotated (to avoid infinite growth): ~2MB per file, up to 3 backups.
 3. We convert every packet to a **thin, JSON-safe** dict (no raw `bytes`) and:
    - keep the last `MAX_MESSAGES` in memory
    - store everything in SQLite (if enabled)
+4. If SMS relay is enabled, the packet is forwarded to your SMS gateway URL
 
 ### Nodes
 
@@ -167,6 +206,7 @@ Quick overview:
 
 - `GET /api/health` – backend status + mesh connection status
 - `GET /api/status` – cached `/json/report` + link to the JSON
+- `GET /api/config` – current runtime config (mesh + SMS, no secrets)
 - `GET /api/nodes` – live nodes (direct + relayed)
 - `GET /api/messages` – message history (SQLite if enabled, else memory)
 - `POST /api/send` – send text (optional `to` and `channel`)

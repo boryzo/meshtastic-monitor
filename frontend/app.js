@@ -3,6 +3,9 @@ const LS = {
   apiBaseUrl: "meshmon.apiBaseUrl",
   meshHost: "meshmon.meshHost",
   meshPort: "meshmon.meshPort",
+  smsEnabled: "meshmon.smsEnabled",
+  smsApiUrl: "meshmon.smsApiUrl",
+  smsPhone: "meshmon.smsPhone",
   sendChannel: "meshmon.sendChannel",
   messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
@@ -1238,13 +1241,54 @@ function closeNodeModal() {
   $("nodeModalBackdrop").setAttribute("aria-hidden", "true");
   activeNodeId = null;
 }
-function openModal() {
+function setSmsKeyHint(apiKeySet) {
+  const hint = $("smsKeyHint");
+  if (!hint) return;
+  if (apiKeySet) {
+    hint.textContent = "API key is saved. Leave blank to keep it.";
+  } else {
+    hint.textContent = "Leave blank to keep existing key.";
+  }
+}
+async function openModal() {
   $("modalBackdrop").classList.remove("hidden");
   $("modal").classList.remove("hidden");
   $("modalBackdrop").setAttribute("aria-hidden", "false");
   $("apiBaseUrl").value = localStorage.getItem(LS.apiBaseUrl) || "";
   $("meshHostInput").value = localStorage.getItem(LS.meshHost) || "";
   $("meshPortInput").value = localStorage.getItem(LS.meshPort) || "4403";
+  $("smsEnabled").checked = (localStorage.getItem(LS.smsEnabled) || "").trim() === "1";
+  $("smsApiUrl").value = localStorage.getItem(LS.smsApiUrl) || "";
+  $("smsPhone").value = localStorage.getItem(LS.smsPhone) || "";
+  $("smsApiKey").value = "";
+  setSmsKeyHint(false);
+  try {
+    const cfg = await apiFetch("/api/config");
+    if (cfg && cfg.meshHost) {
+      $("meshHostInput").value = cfg.meshHost;
+      localStorage.setItem(LS.meshHost, cfg.meshHost);
+    }
+    if (cfg && cfg.meshPort) {
+      $("meshPortInput").value = String(cfg.meshPort);
+      localStorage.setItem(LS.meshPort, String(cfg.meshPort));
+    }
+    if (cfg && cfg.sms) {
+      const sms = cfg.sms;
+      const enabled =
+        sms.enabled === true ||
+        String(sms.enabled || "").toLowerCase() === "true" ||
+        String(sms.enabled || "").toLowerCase() === "1";
+      $("smsEnabled").checked = enabled;
+      localStorage.setItem(LS.smsEnabled, enabled ? "1" : "0");
+      $("smsApiUrl").value = sms.apiUrl || "";
+      $("smsPhone").value = sms.phone || "";
+      localStorage.setItem(LS.smsApiUrl, sms.apiUrl || "");
+      localStorage.setItem(LS.smsPhone, sms.phone || "");
+      setSmsKeyHint(Boolean(sms.apiKeySet));
+    }
+  } catch {
+    // ignore config fetch errors
+  }
 }
 function closeModal() {
   $("modalBackdrop").classList.add("hidden");
@@ -1255,9 +1299,16 @@ async function saveSettings() {
   const apiBaseUrl = ($("apiBaseUrl").value || "").trim();
   const meshHost = ($("meshHostInput").value || "").trim();
   const meshPort = ($("meshPortInput").value || "").trim();
+  const smsEnabled = $("smsEnabled").checked;
+  const smsApiUrl = ($("smsApiUrl").value || "").trim();
+  const smsApiKey = ($("smsApiKey").value || "").trim();
+  const smsPhone = ($("smsPhone").value || "").trim();
   localStorage.setItem(LS.apiBaseUrl, apiBaseUrl);
   localStorage.setItem(LS.meshHost, meshHost);
   localStorage.setItem(LS.meshPort, meshPort);
+  localStorage.setItem(LS.smsEnabled, smsEnabled ? "1" : "0");
+  localStorage.setItem(LS.smsApiUrl, smsApiUrl);
+  localStorage.setItem(LS.smsPhone, smsPhone);
   if (!meshHost) {
     showToast("err", "Meshtastic host is required");
     return;
@@ -1265,12 +1316,20 @@ async function saveSettings() {
   const body = {};
   if (meshHost) body.meshHost = meshHost;
   if (meshPort) body.meshPort = Number(meshPort || "4403");
+  body.smsEnabled = smsEnabled;
+  body.smsApiUrl = smsApiUrl;
+  body.smsPhone = smsPhone;
+  if (smsApiKey) body.smsApiKey = smsApiKey;
   try {
     await apiFetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    $("smsApiKey").value = "";
+    if (smsApiKey) {
+      setSmsKeyHint(true);
+    }
     showToast("ok", `Applied TCP: ${meshHost}:${meshPort || "4403"}`);
     await tickStatus();
     await tickNodes();
@@ -1325,6 +1384,13 @@ function toggleHealthJson() {
 async function exportConfig() {
   try {
     const h = await apiFetch("/api/health");
+    let runtimeConfig = null;
+    let runtimeConfigError = null;
+    try {
+      runtimeConfig = await apiFetch("/api/config");
+    } catch (e) {
+      runtimeConfigError = e.message;
+    }
     const includeSecrets = window.confirm(
       "Include channel PSKs/secrets in export? Click Cancel to exclude."
     );
@@ -1350,6 +1416,9 @@ async function exportConfig() {
         meshHost: h.meshHost,
         meshPort: h.meshPort,
       },
+      sms: runtimeConfig ? runtimeConfig.sms || null : null,
+      configPath: runtimeConfig ? runtimeConfig.configPath || null : null,
+      configError: runtimeConfigError,
       device: deviceConfig,
       deviceConfigError,
       secretsIncluded: includeSecrets,

@@ -6,10 +6,11 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.jsonsafe import json_safe_packet, now_epoch
+from backend.jsonsafe import clamp_str, json_safe_packet, now_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,11 @@ class MeshService:
         mesh_http_port: int = 80,
         status_ttl_sec: int = 5,
         status_timeout_sec: float = 2.0,
+        sms_enabled: bool = False,
+        sms_api_url: Optional[str] = None,
+        sms_api_key: Optional[str] = None,
+        sms_phone: Optional[str] = None,
+        sms_timeout_sec: float = 4.0,
     ) -> None:
         mesh_host = str(mesh_host or "").strip()
         mesh_port_int = int(mesh_port)
@@ -78,6 +84,13 @@ class MeshService:
         self._mesh_http_port = int(mesh_http_port) if int(mesh_http_port) > 0 else 80
         self._status_ttl_sec = max(1, int(status_ttl_sec))
         self._status_timeout_sec = max(0.5, float(status_timeout_sec))
+        self._sms_timeout_sec = max(1.0, float(sms_timeout_sec))
+
+        self._sms_lock = threading.Lock()
+        self._sms_enabled = bool(sms_enabled)
+        self._sms_api_url = (sms_api_url or "").strip()
+        self._sms_api_key = (sms_api_key or "").strip()
+        self._sms_phone = (sms_phone or "").strip()
 
         self._iface: Any = None
         self._iface_lock = threading.Lock()
@@ -197,6 +210,15 @@ class MeshService:
         with self._diag_lock:
             return list(self._diag_cache[-limit:])
 
+    def get_sms_config(self) -> Dict[str, Any]:
+        with self._sms_lock:
+            return {
+                "enabled": self._sms_enabled,
+                "apiUrl": self._sms_api_url or None,
+                "phone": self._sms_phone or None,
+                "apiKeySet": bool(self._sms_api_key),
+            }
+
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         iface = self._get_iface()
         if iface is None:
@@ -255,6 +277,24 @@ class MeshService:
             "metadata": metadata,
             "myInfo": my_info,
         }
+
+    def update_sms_config(
+        self,
+        *,
+        enabled: Optional[bool] = None,
+        api_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        phone: Optional[str] = None,
+    ) -> None:
+        with self._sms_lock:
+            if enabled is not None:
+                self._sms_enabled = bool(enabled)
+            if api_url is not None:
+                self._sms_api_url = str(api_url or "").strip()
+            if api_key is not None:
+                self._sms_api_key = str(api_key or "").strip()
+            if phone is not None:
+                self._sms_phone = str(phone or "").strip()
 
     def get_status_snapshot(self, *, force: bool = False) -> Dict[str, Any]:
         now = time.time()
@@ -463,6 +503,10 @@ class MeshService:
                 self._stats_db.record_message(msg)
             except Exception:
                 pass
+        try:
+            self._send_sms_async(self._sms_message(msg))
+        except Exception:
+            pass
 
     def _log_packet_diag(self, packet: Any) -> None:
         if not isinstance(packet, dict):
@@ -539,6 +583,54 @@ class MeshService:
             self._diag_cache.append(diag)
             if len(self._diag_cache) > self._max_diag:
                 self._diag_cache[:] = self._diag_cache[-self._max_diag :]
+
+    def _sms_ready(self) -> bool:
+        with self._sms_lock:
+            return (
+                self._sms_enabled
+                and bool(self._sms_api_url)
+                and bool(self._sms_api_key)
+                and bool(self._sms_phone)
+            )
+
+    def _sms_message(self, msg: Dict[str, Any]) -> str:
+        from_id = msg.get("fromId") or "?"
+        to_id = msg.get("toId") or "?"
+        text = msg.get("text")
+        if isinstance(text, str) and text.strip():
+            body = text.strip()
+        else:
+            port = msg.get("portnum")
+            body = f"port {port if port is not None else '—'}"
+        combined = f"{from_id}→{to_id}: {body}"
+        return clamp_str(combined, 300) or combined[:300]
+
+    def _send_sms_async(self, message: str) -> None:
+        if not self._sms_ready():
+            return
+
+        def _send() -> None:
+            with self._sms_lock:
+                api_url = self._sms_api_url
+                api_key = self._sms_api_key
+                phone = self._sms_phone
+                timeout = self._sms_timeout_sec
+            if not api_url or not api_key or not phone:
+                return
+            params = {
+                "api_key": api_key,
+                "phone": phone,
+                "message": message,
+            }
+            qs = urllib.parse.urlencode(params, doseq=False, safe="")
+            url = api_url + ("&" if "?" in api_url else "?") + qs
+            try:
+                with urllib.request.urlopen(url, timeout=timeout) as resp:
+                    resp.read()
+            except Exception as e:
+                logger.warning("SMS relay failed: %s", e)
+
+        threading.Thread(target=_send, daemon=True).start()
 
     def _refresh_nodes(self, iface: Any) -> None:
         nodes = iface.nodes  # dict
@@ -639,6 +731,10 @@ class FakeMeshService:
         self._status_fetched_at: Optional[int] = None
         self._diag: List[Dict[str, Any]] = []
         self.sent: List[Tuple[str, Optional[str], Optional[int]]] = []
+        self._sms_enabled = False
+        self._sms_api_url = ""
+        self._sms_api_key = ""
+        self._sms_phone = ""
 
     def start(self) -> None:  # noqa: D401
         self._connected = True
@@ -676,6 +772,31 @@ class FakeMeshService:
     def get_diag_snapshot(self, *, limit: int = 50) -> List[Dict[str, Any]]:
         limit = max(1, int(limit))
         return list(self._diag[-limit:])
+
+    def get_sms_config(self) -> Dict[str, Any]:
+        return {
+            "enabled": self._sms_enabled,
+            "apiUrl": self._sms_api_url or None,
+            "phone": self._sms_phone or None,
+            "apiKeySet": bool(self._sms_api_key),
+        }
+
+    def update_sms_config(
+        self,
+        *,
+        enabled: Optional[bool] = None,
+        api_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        phone: Optional[str] = None,
+    ) -> None:
+        if enabled is not None:
+            self._sms_enabled = bool(enabled)
+        if api_url is not None:
+            self._sms_api_url = str(api_url or "").strip()
+        if api_key is not None:
+            self._sms_api_key = str(api_key or "").strip()
+        if phone is not None:
+            self._sms_phone = str(phone or "").strip()
 
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         return dict(self._radio) if isinstance(self._radio, dict) else None

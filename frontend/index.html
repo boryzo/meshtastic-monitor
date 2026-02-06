@@ -260,6 +260,33 @@
             <input id="meshPortInput" class="input" placeholder="4403" inputmode="numeric" />
           </div>
         </div>
+
+        <div class="divider"></div>
+
+        <div class="field">
+          <label>
+            <input id="smsEnabled" type="checkbox" />
+            Enable SMS relay
+          </label>
+          <div class="hint">Forward every received message through the SMS gateway.</div>
+        </div>
+
+        <div class="field">
+          <label for="smsApiUrl">SMS API URL</label>
+          <input id="smsApiUrl" class="input" placeholder="https://your-sms-gateway.example/api" />
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="smsPhone">SMS Phone</label>
+            <input id="smsPhone" class="input" placeholder="604632342" />
+          </div>
+          <div class="field">
+            <label for="smsApiKey">SMS API Key</label>
+            <input id="smsApiKey" class="input" placeholder="••••" type="password" />
+            <div class="hint" id="smsKeyHint">Leave blank to keep existing key.</div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <div class="row">
