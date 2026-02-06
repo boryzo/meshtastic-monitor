@@ -4,7 +4,7 @@ A tiny web dashboard + JSON API for **Meshtastic over TCP** (direct to your node
 
 ## What you need (before you start)
 
-1. A Meshtastic node reachable over Wi‑Fi (you know its IP/hostname, e.g. `192.168.8.137`)
+1. A Meshtastic node reachable over Wi‑Fi (you know its IP/hostname)
 2. Python `3.9+`
 
 ## Start (2 minutes)
@@ -56,6 +56,8 @@ Most used:
 - `--host` / `--mesh-host` (Meshtastic IP/hostname)
 - `--mesh-port` (default `4403`)
 - `--http-port` (default `8880`)
+- `--log-file` (default `./meshmon.log`)
+- `--log-level` (default `INFO`)
 - `--nodes-history-interval` (default `60` seconds)
 
 You can also set env vars instead of flags:
@@ -72,6 +74,21 @@ You can also set env vars instead of flags:
 - `MESH_HTTP_PORT` (default `80`) for `http://MESH_HOST[:port]/json/report`
 - `STATUS_TTL_SEC` (default `5`) cache `/json/report` for this many seconds
 - `LOG_LEVEL` (default `INFO`)
+- `MESHMON_LOG_FILE` (default `./meshmon.log`)
+
+## Logs (where are they?)
+
+By default the app writes logs to:
+
+- `./meshmon.log` (the directory where you started the command)
+
+You can change it:
+
+```bash
+python -m meshtastic_monitor --log-file /path/to/meshmon.log
+```
+
+Logs are rotated (to avoid infinite growth): ~2MB per file, up to 3 backups.
 
 ## How it works (simple mental model)
 
