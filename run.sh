@@ -32,6 +32,54 @@ DO_INSTALL=1
 DO_CHECK=1
 DO_DEV=0
 
+sudo_run() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+ensure_venv_support() {
+  local tmpdir
+  tmpdir="$(mktemp -d)"
+  if python3 -m venv "$tmpdir" >/dev/null 2>&1; then
+    rm -rf "$tmpdir"
+    return 0
+  fi
+  rm -rf "$tmpdir" || true
+
+  echo "Python venv not available; attempting to install system package..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo_run apt-get update -y
+    sudo_run apt-get install -y python3-venv
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo_run dnf install -y python3-virtualenv python3
+  elif command -v yum >/dev/null 2>&1; then
+    sudo_run yum install -y python3-virtualenv python3
+  elif command -v apk >/dev/null 2>&1; then
+    sudo_run apk add --no-cache python3 py3-virtualenv
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo_run pacman -Sy --noconfirm python
+  elif command -v brew >/dev/null 2>&1; then
+    brew install python
+  else
+    echo "No supported package manager found to install venv support." >&2
+    exit 3
+  fi
+
+  tmpdir="$(mktemp -d)"
+  if python3 -m venv "$tmpdir" >/dev/null 2>&1; then
+    rm -rf "$tmpdir"
+    return 0
+  fi
+  rm -rf "$tmpdir" || true
+  echo "venv still not available after install. Please install Python venv support manually." >&2
+  exit 3
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
@@ -92,6 +140,7 @@ export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-"$ROOT_DIR/.pycache"}"
 mkdir -p "$PYTHONPYCACHEPREFIX"
 
 if [[ ! -d ".venv" ]]; then
+  ensure_venv_support
   echo "Creating venv at .venv/"
   python3 -m venv .venv
 fi
