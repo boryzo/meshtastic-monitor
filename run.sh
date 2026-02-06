@@ -34,7 +34,7 @@ EOF
 
 MESH_HOST="${MESH_HOST:-}"
 MESH_PORT="${MESH_PORT:-4403}"
-HTTP_PORT="${HTTP_PORT:-8080}"
+HTTP_PORT="${HTTP_PORT:-8880}"
 NODES_HISTORY_INTERVAL_SEC="${NODES_HISTORY_INTERVAL_SEC:-60}"
 DO_INSTALL=1
 DO_CHECK=1
@@ -145,6 +145,20 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ $# -eq 0 && -t 0 ]]; then
+  if [[ -z "$(echo "$MESH_HOST" | xargs)" ]]; then
+    read -r -p "Meshtastic host/IP: " MESH_HOST
+  fi
+  read -r -p "Meshtastic TCP port [${MESH_PORT}]: " _mesh_port_in
+  if [[ -n "${_mesh_port_in:-}" ]]; then
+    MESH_PORT="$_mesh_port_in"
+  fi
+  read -r -p "App HTTP port [${HTTP_PORT}]: " _http_port_in
+  if [[ -n "${_http_port_in:-}" ]]; then
+    HTTP_PORT="$_http_port_in"
+  fi
+fi
 
 if ! [[ "$MESH_PORT" =~ ^[0-9]+$ ]]; then
   echo "Invalid --mesh-port: $MESH_PORT" >&2
