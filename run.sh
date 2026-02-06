@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+CURRENT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+git pull
+NEW_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+if [[ -n "$CURRENT_SHA" && -n "$NEW_SHA" && "$CURRENT_SHA" != "$NEW_SHA" ]]; then
+  echo "Updated repo. Restarting with new code..."
+  exec "$0" "$@"
+fi
+
 usage() {
   cat <<'EOF'
 Meshtastic Monitor runner
@@ -31,6 +39,7 @@ NODES_HISTORY_INTERVAL_SEC="${NODES_HISTORY_INTERVAL_SEC:-60}"
 DO_INSTALL=1
 DO_CHECK=1
 DO_DEV=0
+USE_VENV=1
 
 sudo_run() {
   if [[ "$(id -u)" -eq 0 ]]; then
@@ -78,6 +87,16 @@ ensure_venv_support() {
   rm -rf "$tmpdir" || true
   echo "venv still not available after install. Please install Python venv support manually." >&2
   exit 3
+}
+
+is_openwrt() {
+  if [[ -f /etc/openwrt_release ]]; then
+    return 0
+  fi
+  if [[ -f /etc/os-release ]] && grep -qi '^ID=openwrt' /etc/os-release; then
+    return 0
+  fi
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -139,19 +158,32 @@ fi
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-"$ROOT_DIR/.pycache"}"
 mkdir -p "$PYTHONPYCACHEPREFIX"
 
-if [[ ! -d ".venv" ]]; then
-  ensure_venv_support
-  echo "Creating venv at .venv/"
-  python3 -m venv .venv
+if is_openwrt; then
+  USE_VENV=0
 fi
 
-# shellcheck disable=SC1091
-source ".venv/bin/activate"
+if [[ "$USE_VENV" -eq 1 ]]; then
+  if [[ ! -d ".venv" ]]; then
+    ensure_venv_support
+    echo "Creating venv at .venv/"
+    python3 -m venv .venv
+  fi
+  # shellcheck disable=SC1091
+  source ".venv/bin/activate"
+fi
 
 if [[ "$DO_INSTALL" -eq 1 ]]; then
-  python -m pip install -r backend/requirements.txt
+  if [[ "$USE_VENV" -eq 1 ]]; then
+    python -m pip install -r backend/requirements.txt
+  else
+    python3 -m pip install --user -r backend/requirements.txt
+  fi
   if [[ "$DO_DEV" -eq 1 ]]; then
-    python -m pip install -r backend/requirements-dev.txt
+    if [[ "$USE_VENV" -eq 1 ]]; then
+      python -m pip install -r backend/requirements-dev.txt
+    else
+      python3 -m pip install --user -r backend/requirements-dev.txt
+    fi
   fi
 fi
 
