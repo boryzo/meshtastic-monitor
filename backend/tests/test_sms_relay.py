@@ -32,7 +32,17 @@ class _DummyResponse:
 
 def _freeze_time(monkeypatch, values):
     it = iter(values)
-    monkeypatch.setattr(sms_relay.time, "time", lambda: next(it))
+    last = values[-1] if values else 0.0
+
+    def _next():  # noqa: ANN001
+        nonlocal last
+        try:
+            last = next(it)
+        except StopIteration:
+            pass
+        return last
+
+    monkeypatch.setattr(sms_relay.time, "time", _next)
 
 
 def test_sms_relay_sends_and_logs_without_url_or_key(monkeypatch, caplog):
