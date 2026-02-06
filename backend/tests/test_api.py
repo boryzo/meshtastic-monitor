@@ -473,6 +473,44 @@ def test_config_ok(client):
     assert res.get_json()["ok"] is True
 
 
+def test_config_get_includes_sms_defaults(client):
+    res = client.get("/api/config")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is True
+    assert body["sms"]["enabled"] is False
+    assert body["sms"]["apiKeySet"] is False
+
+
+def test_config_updates_sms_settings():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.post(
+        "/api/config",
+        json={
+            "smsEnabled": True,
+            "smsApiUrl": "https://example.invalid/sms",
+            "smsApiKey": "secret",
+            "smsPhone": "REDACTED",
+        },
+    )
+    assert res.status_code == 200
+    sms = svc.get_sms_config()
+    assert sms["enabled"] is True
+    assert sms["apiUrl"] == "https://example.invalid/sms"
+    assert sms["phone"] == "REDACTED"
+    assert sms["apiKeySet"] is True
+
+
+def test_config_rejects_bad_sms_types(client):
+    res = client.post("/api/config", json={"smsEnabled": "maybe"})
+    assert res.status_code == 400
+
+
 def test_config_rejects_bad_types_and_values(client):
     res = client.post("/api/config", json={"meshHost": 123})
     assert res.status_code == 400

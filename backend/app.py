@@ -14,6 +14,7 @@ from flask import Flask, Response, jsonify, request
 from backend.jsonsafe import node_entry, now_epoch, radio_entry
 from backend.mesh_service import MeshService
 from backend.stats_db import StatsDB
+from backend.config_store import resolve_config_path, update_config
 def _get_env_int(name: str, default: int) -> int:
     return _parse_int(os.getenv(name), default)
 def _parse_int(value: Optional[str], default: int) -> int:
@@ -23,6 +24,38 @@ def _parse_int(value: Optional[str], default: int) -> int:
         return int(value)
     except Exception:
         return default
+def _get_env_float(name: str, default: float) -> float:
+    return _parse_float(os.getenv(name), default)
+def _parse_float(value: Optional[str], default: float) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except Exception:
+        return default
+def _parse_bool_env(value: Optional[str], default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    v = str(value).strip().lower()
+    if v in {"1", "true", "yes", "y", "on"}:
+        return True
+    if v in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+def _parse_bool_value(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"1", "true", "yes", "y", "on"}:
+            return True
+        if v in {"0", "false", "no", "n", "off"}:
+            return False
+    return None
 def _base_status_payload(cfg: Any, configured: bool, mesh_service: Any) -> Dict[str, Any]:
     return {
         "ok": True,
@@ -116,6 +149,11 @@ def create_app(
             stats_db=stats_db,
             mesh_http_port=_get_env_int("MESH_HTTP_PORT", 80),
             status_ttl_sec=_get_env_int("STATUS_TTL_SEC", 5),
+            sms_enabled=_parse_bool_env(os.getenv("SMS_ENABLED"), False),
+            sms_api_url=os.getenv("SMS_API_URL", "").strip(),
+            sms_api_key=os.getenv("SMS_API_KEY", "").strip(),
+            sms_phone=os.getenv("SMS_PHONE", "").strip(),
+            sms_timeout_sec=_get_env_float("SMS_TIMEOUT_SEC", 4.0),
         )
         mesh_service.start()
     # --- frontend routes
@@ -130,6 +168,36 @@ def create_app(
         payload = _base_status_payload(cfg, configured, mesh_service)
         payload["generatedAt"] = now_epoch()
         return jsonify(payload)
+    @app.get("/api/config")
+    def api_config_get():
+        cfg = mesh_service.get_config()
+        configured = _is_configured(cfg)
+        sms_cfg = {
+            "enabled": False,
+            "apiUrl": None,
+            "phone": None,
+            "apiKeySet": False,
+        }
+        getter = getattr(mesh_service, "get_sms_config", None)
+        if callable(getter):
+            try:
+                result = getter()
+                if isinstance(result, dict):
+                    sms_cfg.update(result)
+            except Exception:
+                pass
+        cfg_path = os.getenv("MESHMON_CONFIG", "").strip() or None
+        return jsonify(
+            {
+                "ok": True,
+                "configured": configured,
+                "meshHost": (cfg.mesh_host or None),
+                "meshPort": cfg.mesh_port,
+                "sms": sms_cfg,
+                "configPath": cfg_path,
+                "generatedAt": now_epoch(),
+            }
+        )
     @app.get("/api/status")
     def api_status():
         cfg = mesh_service.get_config()
@@ -470,7 +538,12 @@ def create_app(
         body = request.get_json(silent=True) or {}
         mesh_host = body.get("meshHost")
         mesh_port = body.get("meshPort")
+        sms_enabled = body.get("smsEnabled")
+        sms_api_url = body.get("smsApiUrl")
+        sms_api_key = body.get("smsApiKey")
+        sms_phone = body.get("smsPhone")
         kwargs: Dict[str, Any] = {}
+        sms_kwargs: Dict[str, Any] = {}
         if mesh_host is not None:
             if not isinstance(mesh_host, str) or not mesh_host.strip():
                 return jsonify({"ok": False, "error": "meshHost must be a non-empty string"}), 400
@@ -480,10 +553,51 @@ def create_app(
                 kwargs["mesh_port"] = int(mesh_port)
             except Exception:
                 return jsonify({"ok": False, "error": "meshPort must be an int"}), 400
-        if not kwargs:
+        if sms_enabled is not None:
+            parsed = _parse_bool_value(sms_enabled)
+            if parsed is None:
+                return jsonify({"ok": False, "error": "smsEnabled must be a boolean"}), 400
+            sms_kwargs["enabled"] = parsed
+        if sms_api_url is not None:
+            if not isinstance(sms_api_url, str):
+                return jsonify({"ok": False, "error": "smsApiUrl must be a string"}), 400
+            sms_kwargs["api_url"] = sms_api_url.strip()
+        if sms_api_key is not None:
+            if not isinstance(sms_api_key, str):
+                return jsonify({"ok": False, "error": "smsApiKey must be a string"}), 400
+            sms_kwargs["api_key"] = sms_api_key.strip()
+        if sms_phone is not None:
+            if not isinstance(sms_phone, str):
+                return jsonify({"ok": False, "error": "smsPhone must be a string"}), 400
+            sms_kwargs["phone"] = sms_phone.strip()
+        if not kwargs and not sms_kwargs:
             return jsonify({"ok": False, "error": "no config fields provided"}), 400
         try:
-            mesh_service.reconfigure(**kwargs)
+            if kwargs:
+                mesh_service.reconfigure(**kwargs)
+            if sms_kwargs:
+                updater = getattr(mesh_service, "update_sms_config", None)
+                if callable(updater):
+                    updater(**sms_kwargs)
+            config_path_raw = os.getenv("MESHMON_CONFIG", "").strip()
+            if config_path_raw:
+                updates: Dict[str, Dict[str, Any]] = {}
+                if kwargs:
+                    cfg = mesh_service.get_config()
+                    updates["mesh"] = {"host": cfg.mesh_host, "port": str(cfg.mesh_port)}
+                if sms_kwargs:
+                    sms_updates: Dict[str, Any] = {}
+                    if "enabled" in sms_kwargs:
+                        sms_updates["enabled"] = "true" if sms_kwargs["enabled"] else "false"
+                    if "api_url" in sms_kwargs:
+                        sms_updates["api_url"] = sms_kwargs["api_url"]
+                    if "api_key" in sms_kwargs:
+                        sms_updates["api_key"] = sms_kwargs["api_key"]
+                    if "phone" in sms_kwargs:
+                        sms_updates["phone"] = sms_kwargs["phone"]
+                    updates["sms"] = sms_updates
+                if updates:
+                    update_config(resolve_config_path(config_path_raw), updates)
             return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 400

@@ -6,8 +6,17 @@ import os
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from typing import Optional
 
 from backend.app import main as run_app
+from backend.config_store import (
+    DEFAULT_SMS_API_URL,
+    get_bool,
+    get_value,
+    load_config,
+    resolve_config_path,
+    update_config,
+)
 
 
 _DEFAULT_LOG_FILE = "meshmon.log"
@@ -33,6 +42,30 @@ def _resolve_log_path(raw: str | None) -> Path:
     if p.exists() and p.is_dir():
         return p / _DEFAULT_LOG_FILE
     return p
+
+
+def _parse_bool(value: str | None) -> Optional[bool]:
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if v in {"1", "true", "yes", "y", "on"}:
+        return True
+    if v in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
+def _coalesce_str(*values: str | None) -> str:
+    for v in values:
+        if v is None:
+            continue
+        if isinstance(v, str):
+            s = v.strip()
+            if s:
+                return s
+        else:
+            return str(v)
+    return ""
 
 
 def _configure_logging(*, log_level: str | None, log_file: str | None) -> None:
@@ -73,6 +106,7 @@ def _configure_logging(*, log_level: str | None, log_file: str | None) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Meshtastic Monitor")
+    parser.add_argument("--config", dest="config_path", help="Config file path (default: ./meshmon.ini)")
     parser.add_argument("--host", "--mesh-host", dest="mesh_host", help="Meshtastic host/IP")
     parser.add_argument("--mesh-port", dest="mesh_port", help="Meshtastic TCP port (default 4403)")
     parser.add_argument("--http-port", dest="http_port", help="HTTP port for web app (default 8880)")
@@ -91,21 +125,70 @@ def main(argv: list[str] | None = None) -> None:
         dest="nodes_history_interval",
         help="Node history sample interval in seconds (default 60)",
     )
+    parser.add_argument("--sms-api-url", dest="sms_api_url", help="SMS API base URL")
+    parser.add_argument("--sms-api-key", dest="sms_api_key", help="SMS API key")
+    parser.add_argument("--sms-phone", dest="sms_phone", help="SMS destination phone")
+    parser.add_argument("--sms-enabled", dest="sms_enabled", action="store_true", help="Enable SMS relay")
+    parser.add_argument("--sms-disabled", dest="sms_enabled", action="store_false", help="Disable SMS relay")
+    parser.set_defaults(sms_enabled=None)
     args = parser.parse_args(argv)
 
     _configure_logging(log_level=args.log_level, log_file=args.log_file)
 
-    mesh_host = _prompt(args.mesh_host or os.getenv("MESH_HOST", ""), "Meshtastic host/IP: ")
-    mesh_port = args.mesh_port or os.getenv("MESH_PORT", "4403")
-    http_port = args.http_port or os.getenv("HTTP_PORT", "8880")
-    nodes_history = args.nodes_history_interval or os.getenv("NODES_HISTORY_INTERVAL_SEC", "60")
+    config_path = resolve_config_path(args.config_path)
+    cfg = load_config(config_path)
+
+    mesh_host_cfg = get_value(cfg, "mesh", "host", "")
+    mesh_port_cfg = get_value(cfg, "mesh", "port", "4403")
+    http_port_cfg = get_value(cfg, "http", "port", "8880")
+    nodes_history_cfg = get_value(cfg, "stats", "nodes_history_interval_sec", "60")
+    sms_enabled_cfg = get_bool(cfg, "sms", "enabled", False)
+    sms_api_url_cfg = get_value(cfg, "sms", "api_url", DEFAULT_SMS_API_URL)
+    sms_api_key_cfg = get_value(cfg, "sms", "api_key", "")
+    sms_phone_cfg = get_value(cfg, "sms", "phone", "")
+
+    mesh_host = _coalesce_str(args.mesh_host, os.getenv("MESH_HOST"), mesh_host_cfg)
+    mesh_host = _prompt(mesh_host, "Meshtastic host/IP: ")
+    mesh_port = _coalesce_str(args.mesh_port, os.getenv("MESH_PORT"), mesh_port_cfg) or "4403"
+    http_port = _coalesce_str(args.http_port, os.getenv("HTTP_PORT"), http_port_cfg) or "8880"
+    nodes_history = _coalesce_str(
+        args.nodes_history_interval, os.getenv("NODES_HISTORY_INTERVAL_SEC"), nodes_history_cfg
+    ) or "60"
+
+    sms_enabled_env = _parse_bool(os.getenv("SMS_ENABLED"))
+    sms_enabled = args.sms_enabled if args.sms_enabled is not None else sms_enabled_env
+    if sms_enabled is None:
+        sms_enabled = sms_enabled_cfg
+    sms_api_url = _coalesce_str(args.sms_api_url, os.getenv("SMS_API_URL"), sms_api_url_cfg)
+    sms_api_key = _coalesce_str(args.sms_api_key, os.getenv("SMS_API_KEY"), sms_api_key_cfg)
+    sms_phone = _coalesce_str(args.sms_phone, os.getenv("SMS_PHONE"), sms_phone_cfg)
 
     os.environ["MESH_HOST"] = mesh_host
     os.environ["MESH_PORT"] = str(mesh_port)
     os.environ["HTTP_PORT"] = str(http_port)
     os.environ["NODES_HISTORY_INTERVAL_SEC"] = str(nodes_history)
+    os.environ["MESHMON_CONFIG"] = str(config_path)
+    os.environ["SMS_ENABLED"] = "1" if sms_enabled else "0"
+    os.environ["SMS_API_URL"] = str(sms_api_url or "")
+    os.environ["SMS_API_KEY"] = str(sms_api_key or "")
+    os.environ["SMS_PHONE"] = str(sms_phone or "")
     if args.log_level:
         os.environ["LOG_LEVEL"] = str(args.log_level)
+
+    update_config(
+        config_path,
+        {
+            "mesh": {"host": mesh_host, "port": str(mesh_port)},
+            "http": {"port": str(http_port)},
+            "stats": {"nodes_history_interval_sec": str(nodes_history)},
+            "sms": {
+                "enabled": "true" if sms_enabled else "false",
+                "api_url": sms_api_url,
+                "api_key": sms_api_key,
+                "phone": sms_phone,
+            },
+        },
+    )
 
     run_app()
 
