@@ -32,6 +32,26 @@ jobs:
           python -m build
           python -m twine check dist/*
 
+      - name: Show wheel metadata
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+          
+          wheels = sorted(glob.glob("dist/*.whl"))
+          if not wheels:
+              raise SystemExit("No wheel found in dist/")
+          whl = wheels[0]
+          with zipfile.ZipFile(whl) as z:
+              meta_paths = [n for n in z.namelist() if n.endswith(".dist-info/METADATA")]
+              if not meta_paths:
+                  raise SystemExit(f"No METADATA in {whl}")
+              data = z.read(meta_paths[0]).decode("utf-8", errors="replace")
+          for line in data.splitlines():
+              if line.startswith("Metadata-Version:") or line.startswith("Name:") or line.startswith("Version:"):
+                  print(line)
+          PY
+
       - name: Publish (PyPI token)
         if: ${{ env.PYPI_API_TOKEN != '' }}
         env:
