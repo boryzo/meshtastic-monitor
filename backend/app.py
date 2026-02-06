@@ -249,6 +249,19 @@ def create_app(
                 msgs = list(reversed(msgs))
             msgs = msgs[: int(limit)]
         return jsonify(msgs)
+
+    @app.get("/api/diag")
+    def api_diag():
+        limit_raw = request.args.get("limit")
+        limit = _parse_int(limit_raw, 50)
+        getter = getattr(mesh_service, "get_diag_snapshot", None)
+        items: list = []
+        if callable(getter):
+            try:
+                items = getter(limit=limit)
+            except Exception:
+                items = []
+        return jsonify({"items": items, "generatedAt": now_epoch()})
     @app.get("/api/channels")
     def api_channels():
         channels = mesh_service.get_channels_snapshot()

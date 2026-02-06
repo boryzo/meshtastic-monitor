@@ -884,6 +884,53 @@ async function tickStats() {
     );
   }
 }
+
+async function tickDiag() {
+  try {
+    const data = await apiFetch("/api/diag?limit=50");
+    const items = Array.isArray(data.items) ? data.items : [];
+    const updated = data.generatedAt
+      ? new Date(data.generatedAt * 1000).toLocaleTimeString()
+      : "—";
+    $("diagMeta").textContent = `${items.length} packets • updated ${updated}`;
+    renderList(
+      "diagList",
+      items,
+      (d) => {
+        const from = d.fromId || "—";
+        const to = d.toId || "—";
+        const ts = d.ts ? fmtTime(d.ts) : "—";
+        const port = d.portnum !== null && d.portnum !== undefined ? d.portnum : "—";
+        const decoded = d.decoded ? "decoded" : "no-decoded";
+        const ch =
+          d.chIndex !== null && d.chIndex !== undefined
+            ? `ch ${d.chIndex}`
+            : d.chHash
+              ? `ch ${d.chHash}`
+              : "ch —";
+        const enc =
+          d.encrypted === true ? "enc" : d.encrypted === false ? "open" : "enc ?";
+        const pLen =
+          d.payloadLen !== null && d.payloadLen !== undefined ? `payload ${d.payloadLen}` : "";
+        const pUtf =
+          d.payloadUtf8 === true ? "utf8" : d.payloadUtf8 === false ? "bin" : "";
+        const preview = d.textPreview ? `txt "${d.textPreview}"` : "";
+        const meta = [decoded, `port ${port}`, ch, enc, pLen, pUtf, preview]
+          .filter((v) => v && String(v).trim() !== "")
+          .join(" • ");
+        return `<div class="list-row">
+          <div class="mono">${escapeHtml(ts)} ${escapeHtml(from)} → ${escapeHtml(to)}</div>
+          <div class="mono">${escapeHtml(String(port))}</div>
+          <div class="muted">${escapeHtml(meta)}</div>
+        </div>`;
+      },
+      "No diagnostics yet"
+    );
+  } catch (e) {
+    $("diagMeta").textContent = `Failed to load diagnostics: ${e.message}`;
+    $("diagList").innerHTML = `<div class="muted">Diagnostics unavailable</div>`;
+  }
+}
 function prettyAppName(app) {
   if (!app) return "—";
   if (app === "POSITION_APP") return "Position";
@@ -1479,6 +1526,7 @@ function init() {
   tickRadio();
   tickMessages();
   tickStats();
+  tickDiag();
   if (lastNodeDetailsId) loadNodeDetails(lastNodeDetailsId);
   window.setInterval(tickStatus, 2500);
   window.setInterval(tickNodes, 5000);
@@ -1486,5 +1534,6 @@ function init() {
   window.setInterval(tickRadio, 5000);
   window.setInterval(tickMessages, 2000);
   window.setInterval(tickStats, 10000);
+  window.setInterval(tickDiag, 5000);
 }
 document.addEventListener("DOMContentLoaded", init);

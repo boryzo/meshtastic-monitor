@@ -90,6 +90,10 @@ class MeshService:
 
         self._channels_cache: List[Dict[str, Any]] = []
         self._channels_lock = threading.Lock()
+
+        self._diag_cache: List[Dict[str, Any]] = []
+        self._diag_lock = threading.Lock()
+        self._max_diag = 200
         self._status_lock = threading.Lock()
         self._status_report: Optional[Dict[str, Any]] = None
         self._status_report_status: Optional[str] = None
@@ -187,6 +191,11 @@ class MeshService:
     def get_channels_snapshot(self) -> List[Dict[str, Any]]:
         with self._channels_lock:
             return list(self._channels_cache)
+
+    def get_diag_snapshot(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        limit = max(1, int(limit))
+        with self._diag_lock:
+            return list(self._diag_cache[-limit:])
 
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         iface = self._get_iface()
@@ -511,6 +520,26 @@ class MeshService:
             payload_utf8,
         )
 
+        diag = {
+            "ts": now_epoch(),
+            "id": msg_id,
+            "fromId": from_id,
+            "toId": to_id,
+            "chIndex": ch_index,
+            "chHash": ch_hash,
+            "portnum": portnum,
+            "decoded": decoded_present,
+            "encrypted": encrypted,
+            "hasPSK": has_psk,
+            "textPreview": text_preview,
+            "payloadLen": payload_len,
+            "payloadUtf8": payload_utf8,
+        }
+        with self._diag_lock:
+            self._diag_cache.append(diag)
+            if len(self._diag_cache) > self._max_diag:
+                self._diag_cache[:] = self._diag_cache[-self._max_diag :]
+
     def _refresh_nodes(self, iface: Any) -> None:
         nodes = iface.nodes  # dict
         if not isinstance(nodes, dict):
@@ -608,6 +637,7 @@ class FakeMeshService:
         self._status_report: Optional[Dict[str, Any]] = None
         self._status_report_status: Optional[str] = None
         self._status_fetched_at: Optional[int] = None
+        self._diag: List[Dict[str, Any]] = []
         self.sent: List[Tuple[str, Optional[str], Optional[int]]] = []
 
     def start(self) -> None:  # noqa: D401
@@ -642,6 +672,10 @@ class FakeMeshService:
 
     def get_channels_snapshot(self) -> List[Dict[str, Any]]:
         return list(self._channels)
+
+    def get_diag_snapshot(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        limit = max(1, int(limit))
+        return list(self._diag[-limit:])
 
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         return dict(self._radio) if isinstance(self._radio, dict) else None
@@ -689,6 +723,9 @@ class FakeMeshService:
         self._status_report = dict(report)
         self._status_report_status = status
         self._status_fetched_at = now_epoch()
+
+    def seed_diag(self, items: List[Dict[str, Any]]) -> None:
+        self._diag = list(items)
 
 
 def _channel_entry(index: int, channel: Any) -> Optional[Dict[str, Any]]:
