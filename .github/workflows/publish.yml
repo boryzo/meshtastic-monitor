@@ -5,6 +5,12 @@ on:
     types:
       - published
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref or tag to publish (e.g. v0.1.4)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -17,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.ref != '' && inputs.ref || (github.event_name == 'release' && github.event.release.tag_name || github.ref) }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -42,7 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.ref != '' && inputs.ref || (github.event_name == 'release' && github.event.release.tag_name || github.ref) }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -58,7 +64,7 @@ jobs:
           python -m twine check dist/*
 
       - name: Verify tag matches version
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_call' && inputs.ref != '')
         run: |
           python - <<'PY'
           import configparser
@@ -69,6 +75,8 @@ jobs:
           
           if "${{ github.event_name }}" == "release":
               tag = "${{ github.event.release.tag_name }}".strip()
+          elif "${{ github.event_name }}" == "workflow_call" and "${{ inputs.ref }}" != "":
+              tag = "${{ inputs.ref }}".strip()
           else:
               tag = "${{ github.ref_name }}".strip()
           tag_version = tag[1:] if tag.startswith("v") else tag
