@@ -14,6 +14,29 @@ from backend.jsonsafe import json_safe_packet, now_epoch
 logger = logging.getLogger(__name__)
 
 
+def _first_packet_value(packet: Any, *keys: str) -> Any:
+    if not isinstance(packet, dict):
+        return None
+    for key in keys:
+        if key in packet:
+            value = packet.get(key)
+            if value is not None:
+                return value
+    return None
+
+
+def _payload_utf8_info(payload: Any) -> tuple[Optional[int], Optional[bool]]:
+    if isinstance(payload, (bytes, bytearray)):
+        try:
+            payload.decode("utf-8")
+            return len(payload), True
+        except Exception:
+            return len(payload), False
+    if isinstance(payload, str):
+        return len(payload), True
+    return None, None
+
+
 @dataclass
 class MeshConfig:
     mesh_host: str
@@ -403,6 +426,7 @@ class MeshService:
             pass
 
     def _on_receive(self, packet, interface) -> None:  # noqa: ANN001
+        self._log_packet_diag(packet)
         try:
             msg = json_safe_packet(packet)
         except Exception as e:
@@ -430,6 +454,62 @@ class MeshService:
                 self._stats_db.record_message(msg)
             except Exception:
                 pass
+
+    def _log_packet_diag(self, packet: Any) -> None:
+        if not isinstance(packet, dict):
+            logger.info(
+                "RX msg id=%s from=%s to=%s chIndex=%s chHash=%s portnum=%s decoded=%s encrypted=%s hasPSK=%s textPreview=%r payloadLen=%s payloadUtf8=%s",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                False,
+                None,
+                None,
+                "",
+                None,
+                None,
+            )
+            return
+
+        decoded = packet.get("decoded")
+        decoded_present = decoded is not None
+        decoded_dict = decoded if isinstance(decoded, dict) else {}
+
+        portnum = decoded_dict.get("portnum")
+        text = decoded_dict.get("text")
+        payload = decoded_dict.get("payload")
+
+        payload_len, payload_utf8 = _payload_utf8_info(payload)
+        text_preview = ""
+        if isinstance(text, str) and text:
+            text_preview = text[:20].replace("\n", " ").replace("\r", " ")
+
+        msg_id = _first_packet_value(packet, "id")
+        from_id = packet.get("fromId")
+        to_id = packet.get("toId")
+        ch_index = _first_packet_value(packet, "channelIndex", "channel", "channel_index")
+        ch_hash = _first_packet_value(packet, "channelHash", "channel_hash")
+        encrypted = _first_packet_value(packet, "encrypted")
+        has_psk = _first_packet_value(packet, "hasPSK", "has_psk")
+
+        logger.info(
+            "RX msg id=%s from=%s to=%s chIndex=%s chHash=%s portnum=%s decoded=%s encrypted=%s hasPSK=%s textPreview=%r payloadLen=%s payloadUtf8=%s",
+            msg_id,
+            from_id,
+            to_id,
+            ch_index,
+            ch_hash,
+            portnum,
+            decoded_present,
+            encrypted,
+            has_psk,
+            text_preview,
+            payload_len,
+            payload_utf8,
+        )
 
     def _refresh_nodes(self, iface: Any) -> None:
         nodes = iface.nodes  # dict
