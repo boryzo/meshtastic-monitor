@@ -328,12 +328,16 @@ class MeshService:
         }
 
     def _status_url(self) -> Optional[str]:
-        host = self._cfg.mesh_host
-        if not host:
+        host_raw = self._cfg.mesh_host
+        if not host_raw:
             return None
-        if self._mesh_http_port == 80:
+        host, host_port = _split_host_port(host_raw)
+        http_port = self._mesh_http_port
+        if host_port and host_port != self._cfg.mesh_port:
+            http_port = host_port
+        if http_port == 80:
             return f"http://{host}/json/report"
-        return f"http://{host}:{self._mesh_http_port}/json/report"
+        return f"http://{host}:{http_port}/json/report"
 
     def _fetch_status_report(self) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
         url = self._status_url()
@@ -930,3 +934,22 @@ def _get_path(obj: Any, *paths: str) -> Any:
         if ok:
             return cur
     return None
+
+
+def _split_host_port(host: str) -> tuple[str, Optional[int]]:
+    host = (host or "").strip()
+    if not host:
+        return host, None
+    if host.startswith("[") and "]" in host:
+        return host, None
+    if host.count(":") >= 2:
+        return host, None
+    if ":" not in host:
+        return host, None
+    base, port_str = host.rsplit(":", 1)
+    if not port_str.isdigit():
+        return host, None
+    try:
+        return base, int(port_str)
+    except Exception:
+        return host, None

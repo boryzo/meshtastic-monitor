@@ -24,3 +24,13 @@ def test_mesh_service_reconfigure_validates_mesh_port():
 
     with pytest.raises(ValueError):
         svc.reconfigure(mesh_port=70000)
+
+
+def test_status_url_ignores_tcp_port_in_host():
+    svc = MeshService("192.168.8.137:4403", 4403, mesh_http_port=80)
+    assert svc._status_url() == "http://192.168.8.137/json/report"
+
+
+def test_status_url_uses_host_port_when_diff():
+    svc = MeshService("192.168.8.137:8081", 4403, mesh_http_port=80)
+    assert svc._status_url() == "http://192.168.8.137:8081/json/report"
