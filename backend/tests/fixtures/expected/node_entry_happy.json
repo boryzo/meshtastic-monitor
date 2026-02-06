@@ -1,0 +1,13 @@
+{
+  "id": "!abcd",
+  "short": "SN",
+  "long": "Long Name",
+  "role": "CLIENT",
+  "hwModel": "TBEAM",
+  "firmware": "2.4.0",
+  "snr": -3,
+  "hopsAway": 2,
+  "lastHeard": 100,
+  "ageSec": 100,
+  "quality": "ok"
+}

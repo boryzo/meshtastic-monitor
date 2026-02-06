@@ -1,0 +1,15 @@
+{
+  "rxTime": 1,
+  "fromId": "!a",
+  "toId": "!b",
+  "snr": -1,
+  "rssi": -100,
+  "hopLimit": null,
+  "channel": null,
+  "portnum": 3,
+  "app": "POSITION_APP",
+  "requestId": null,
+  "wantResponse": null,
+  "text": "hi",
+  "payload_b64": "AQI="
+}

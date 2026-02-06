@@ -1,0 +1,23 @@
+{
+  "ts": 200,
+  "channelUtilization": 13.2149991989136,
+  "utilizationTx": 0.287805557250977,
+  "secondsSinceBoot": 1253,
+  "rxLog": null,
+  "txLog": null,
+  "rxAllLog": null,
+  "batteryPercent": 100,
+  "batteryVoltageMv": 4325,
+  "isCharging": true,
+  "hasUsb": true,
+  "hasBattery": true,
+  "heapFree": 35488,
+  "heapTotal": 281216,
+  "fsFree": 1019904,
+  "fsTotal": 1048576,
+  "wifiRssi": null,
+  "wifiIp": "192.168.8.137",
+  "radioFrequency": 869.525024414062,
+  "loraChannel": 1,
+  "rebootCounter": 58
+}

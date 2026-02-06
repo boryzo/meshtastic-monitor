@@ -1,0 +1,15 @@
+{
+  "rxTime": 1,
+  "fromId": null,
+  "toId": null,
+  "snr": null,
+  "rssi": null,
+  "hopLimit": null,
+  "channel": 0,
+  "portnum": 1,
+  "app": null,
+  "requestId": null,
+  "wantResponse": null,
+  "text": null,
+  "payload_b64": null
+}

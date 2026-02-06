@@ -142,28 +142,22 @@ class StatsDB:
         limit = int(limit)
         offset = max(0, int(offset))
         order_dir = "DESC" if str(order).lower() == "desc" else "ASC"
+        limit_sql = "" if limit <= 0 else "LIMIT ? OFFSET ?"
+        params: List[Any] = []
+        if limit > 0:
+            params.extend([int(limit), int(offset)])
 
         with self._lock:
-            if limit <= 0:
-                rows = self._conn.execute(
-                    f"""
-                    SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum,
-                           app, request_id, want_response, text, payload_b64, error
-                    FROM messages
-                    ORDER BY rx_time {order_dir}, id {order_dir}
-                    """,
-                ).fetchall()
-            else:
-                rows = self._conn.execute(
-                    f"""
-                    SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum,
-                           app, request_id, want_response, text, payload_b64, error
-                    FROM messages
-                    ORDER BY rx_time {order_dir}, id {order_dir}
-                    LIMIT ? OFFSET ?
-                    """,
-                    (int(limit), int(offset)),
-                ).fetchall()
+            rows = self._conn.execute(
+                f"""
+                SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum,
+                       app, request_id, want_response, text, payload_b64, error
+                FROM messages
+                ORDER BY rx_time {order_dir}, id {order_dir}
+                {limit_sql}
+                """,
+                tuple(params),
+            ).fetchall()
 
         out: List[Dict[str, Any]] = []
         for r in rows:

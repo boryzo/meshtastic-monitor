@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import sqlite3
 
-from backend.jsonsafe import now_epoch
+import pytest
+
+import backend.stats_db as stats_db
+
+FIXED_NOW = 200
 from backend.stats_db import StatsDB
+
+
+@pytest.fixture(autouse=True)
+def _fixed_now(monkeypatch):
+    monkeypatch.setattr(stats_db, "now_epoch", lambda: FIXED_NOW)
 
 
 def test_stats_db_counts_and_top_nodes():
@@ -100,7 +109,7 @@ def test_stats_db_counts_and_top_nodes():
 
 def test_stats_db_hourly_buckets_are_rounded_to_hour():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
     base = now - (now % 3600)
     db.record_message(
         {
@@ -134,7 +143,7 @@ def test_stats_db_hourly_buckets_are_rounded_to_hour():
 
 def test_stats_db_record_nodes_snapshot_and_known_entries():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_nodes_snapshot(
         {
@@ -184,7 +193,7 @@ def test_stats_db_record_nodes_snapshot_and_known_entries():
 
 def test_stats_db_get_node_stats():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_nodes_snapshot(
         {
@@ -221,7 +230,7 @@ def test_stats_db_get_node_stats():
 
 def test_stats_db_record_nodes_snapshot_supports_snake_case_keys():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_nodes_snapshot(
         {
@@ -246,7 +255,7 @@ def test_stats_db_record_nodes_snapshot_supports_snake_case_keys():
 
 def test_stats_db_record_nodes_snapshot_reads_firmware_from_user_and_ignores_version_dict():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_nodes_snapshot(
         {
@@ -277,7 +286,7 @@ def test_stats_db_record_nodes_snapshot_reads_firmware_from_user_and_ignores_ver
 
 def test_stats_db_message_history_persists():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_message(
         {
@@ -325,7 +334,7 @@ def test_stats_db_list_messages_order_and_offset():
 
 def test_stats_db_node_history_records_quality():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_nodes_snapshot(
         {
@@ -346,7 +355,7 @@ def test_stats_db_node_history_records_quality():
 
 def test_stats_db_known_entries_leaves_hops_away_empty_when_missing():
     db = StatsDB(":memory:")
-    now = now_epoch()
+    now = FIXED_NOW
 
     db.record_message(
         {

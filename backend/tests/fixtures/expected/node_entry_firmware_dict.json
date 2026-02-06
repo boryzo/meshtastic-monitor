@@ -1,0 +1,13 @@
+{
+  "id": "!abcd",
+  "short": "SN",
+  "long": "Long Name",
+  "role": null,
+  "hwModel": null,
+  "firmware": null,
+  "snr": 1.0,
+  "hopsAway": null,
+  "lastHeard": 100,
+  "ageSec": 100,
+  "quality": "good"
+}

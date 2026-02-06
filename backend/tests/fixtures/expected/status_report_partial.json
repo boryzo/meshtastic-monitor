@@ -1,0 +1,23 @@
+{
+  "ts": 200,
+  "channelUtilization": null,
+  "utilizationTx": null,
+  "secondsSinceBoot": null,
+  "rxLog": null,
+  "txLog": null,
+  "rxAllLog": null,
+  "batteryPercent": 50,
+  "batteryVoltageMv": null,
+  "isCharging": null,
+  "hasUsb": null,
+  "hasBattery": null,
+  "heapFree": null,
+  "heapTotal": null,
+  "fsFree": null,
+  "fsTotal": null,
+  "wifiRssi": null,
+  "wifiIp": null,
+  "radioFrequency": null,
+  "loraChannel": null,
+  "rebootCounter": null
+}

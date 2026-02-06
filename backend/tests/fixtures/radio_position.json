@@ -1,0 +1,14 @@
+{
+  "user": {
+    "id": "!me",
+    "shortName": "ME",
+    "longName": "Me"
+  },
+  "snr": 1,
+  "lastHeard": 100,
+  "position": {
+    "latitudeI": 123456789,
+    "longitudeI": -123456789,
+    "altitude": 120
+  }
+}

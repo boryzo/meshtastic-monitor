@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from backend.app import create_app
 from backend.mesh_service import FakeMeshService
 from backend.stats_db import StatsDB
+
+FIXED_NOW = 200
 
 
 @pytest.fixture()
@@ -20,13 +20,13 @@ def client():
                 "firmwareVersion": "2.4.0",
                 "snr": 1,
                 "hopsAway": 1,
-                "lastHeard": int(time.time()),
+                "lastHeard": FIXED_NOW,
             },
             "!relay": {
                 "user": {"shortName": "R", "longName": "Relayed", "role": "ROUTER", "hwModel": "HELTEC_V3"},
                 "snr": None,
                 "hopsAway": 2,
-                "lastHeard": int(time.time()) - 10,
+                "lastHeard": FIXED_NOW - 10,
             },
         }
     )
@@ -189,7 +189,7 @@ def test_nodes_leaves_hops_away_empty_when_missing():
             "!direct": {
                 "user": {"shortName": "D", "longName": "Direct"},
                 "snr": 1,
-                "lastHeard": int(time.time()),
+                "lastHeard": FIXED_NOW,
             },
         }
     )
@@ -211,7 +211,7 @@ def test_radio_endpoint_returns_node():
         {
             "user": {"id": "!me", "shortName": "ME", "longName": "My Radio", "hwModel": "TBEAM"},
             "snr": 2.5,
-            "lastHeard": int(time.time()),
+            "lastHeard": FIXED_NOW,
         }
     )
     app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))

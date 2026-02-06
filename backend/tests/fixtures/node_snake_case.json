@@ -1,0 +1,11 @@
+{
+  "user": {
+    "short_name": "SN",
+    "long_name": "Long Name",
+    "role": "ROUTER",
+    "hw_model": "HELTEC_V3"
+  },
+  "snr": -3,
+  "hops_away": 3,
+  "last_heard": 100
+}

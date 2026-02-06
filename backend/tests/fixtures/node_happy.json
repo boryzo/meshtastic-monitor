@@ -1,0 +1,12 @@
+{
+  "user": {
+    "shortName": "SN",
+    "longName": "Long Name",
+    "role": "CLIENT",
+    "hwModel": "TBEAM"
+  },
+  "firmwareVersion": "2.4.0",
+  "snr": -3,
+  "hopsAway": "2",
+  "lastHeard": 100
+}

@@ -1,0 +1,13 @@
+{
+  "id": "!abcd",
+  "short": "SN",
+  "long": "Long Name",
+  "role": "ROUTER",
+  "hwModel": "HELTEC_V3",
+  "firmware": null,
+  "snr": -3,
+  "hopsAway": 3,
+  "lastHeard": 100,
+  "ageSec": 100,
+  "quality": "ok"
+}

@@ -1,0 +1,13 @@
+{
+  "user": {
+    "shortName": "SN",
+    "longName": "Long Name"
+  },
+  "firmwareVersion": {
+    "major": 2,
+    "minor": 6,
+    "patch": 0
+  },
+  "snr": 1.0,
+  "lastHeard": 100
+}

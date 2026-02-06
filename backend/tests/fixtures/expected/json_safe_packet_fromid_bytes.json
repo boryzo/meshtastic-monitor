@@ -1,0 +1,15 @@
+{
+  "rxTime": 1,
+  "fromId": "AQ==",
+  "toId": "!b",
+  "snr": null,
+  "rssi": null,
+  "hopLimit": null,
+  "channel": null,
+  "portnum": null,
+  "app": null,
+  "requestId": null,
+  "wantResponse": null,
+  "text": null,
+  "payload_b64": "Ag=="
+}

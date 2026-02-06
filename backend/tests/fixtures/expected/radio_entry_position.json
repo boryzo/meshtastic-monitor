@@ -1,0 +1,29 @@
+{
+  "id": "!me",
+  "short": "ME",
+  "long": "Me",
+  "role": null,
+  "hwModel": null,
+  "firmware": null,
+  "snr": 1,
+  "hopsAway": 1,
+  "lastHeard": 100,
+  "ageSec": 100,
+  "quality": "good",
+  "nodeNum": null,
+  "isFavorite": null,
+  "isIgnored": null,
+  "isMuted": null,
+  "isKeyManuallyVerified": null,
+  "viaMqtt": null,
+  "channel": null,
+  "batteryLevel": null,
+  "voltage": null,
+  "channelUtilization": null,
+  "airUtilTx": null,
+  "position": {
+    "latitude": 12.3456789,
+    "longitude": -12.3456789,
+    "altitude": 120.0
+  }
+}
