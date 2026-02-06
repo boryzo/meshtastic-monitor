@@ -15,10 +15,22 @@ A tiny web dashboard + JSON API for **Meshtastic over TCP** (direct to your node
 pip install meshtastic-monitor
 ```
 
+If `pip` is not available, use:
+
+```bash
+python3 -m pip install meshtastic-monitor
+```
+
 ### 2) Run
 
 ```bash
 python -m meshtastic_monitor --host YOUR_MESH_IP
+```
+
+If `python` is not available, use:
+
+```bash
+python3 -m meshtastic_monitor --host YOUR_MESH_IP
 ```
 
 Then open:
