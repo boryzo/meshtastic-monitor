@@ -22,6 +22,17 @@ Choose **one** method:
 
 ## Release steps
 
+### Option A: GitHub workflow (no manual tag)
+
+1. Open Actions → **Release (bump + tag)**.
+2. Optional: provide a version (e.g. `0.5.1`).
+   - If left empty, it bumps `0.1.X` → `0.1.(X+1)`.
+3. Run the workflow.
+
+This creates a commit, tags `vX.Y.Z`, and triggers `Publish`.
+
+### Option B: Manual tag
+
 1. Update version in `setup.cfg`.
 2. Commit the version bump.
 3. Tag and push:
