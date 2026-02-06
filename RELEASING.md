@@ -29,7 +29,7 @@ Choose **one** method:
    - If left empty, it bumps `0.1.X` → `0.1.(X+1)`.
 3. Run the workflow.
 
-This creates a commit, tags `vX.Y.Z`, and triggers `Publish`.
+This creates a commit, tags `vX.Y.Z`, creates a GitHub Release, and triggers `Publish`.
 
 ### Option B: Manual tag
 
