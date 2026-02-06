@@ -147,6 +147,7 @@ def test_node_entry_leaves_hops_empty_when_missing():
     }
     out = node_entry("!abcd", node)
     assert out["hopsAway"] is None
+    assert out["role"] == "CLIENT"
 
 
 def test_clamp_str_limits_length_and_handles_bad_str():

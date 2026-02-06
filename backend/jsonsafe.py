@@ -134,14 +134,17 @@ def radio_entry(node: Dict[str, Any]) -> Dict[str, Any]:
     }
 def node_user_fields(node: Any) -> Dict[str, Optional[str]]:
     if not isinstance(node, dict):
-        return {"short": None, "long": None, "role": None, "hwModel": None}
+        return {"short": None, "long": None, "role": "CLIENT", "hwModel": None}
     user = node.get("user") or {}
     if not isinstance(user, dict):
         user = {}
+    role_val = role_str(user.get("role"))
+    if not role_val:
+        role_val = "CLIENT"
     return {
         "short": clamp_str(user.get("shortName") or user.get("short_name"), 40),
         "long": clamp_str(user.get("longName") or user.get("long_name"), 80),
-        "role": clamp_str(role_str(user.get("role")), 40),
+        "role": clamp_str(role_val, 40),
         "hwModel": clamp_str(
             user.get("hwModel") or user.get("hw_model") or user.get("hwmodel"), 40
         ),

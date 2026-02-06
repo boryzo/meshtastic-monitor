@@ -2,7 +2,7 @@
   "id": "!me",
   "short": "ME",
   "long": "Me",
-  "role": null,
+  "role": "CLIENT",
   "hwModel": null,
   "firmware": null,
   "snr": 1,

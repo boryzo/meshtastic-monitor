@@ -2,7 +2,7 @@
   "id": "!abcd",
   "short": "SN",
   "long": "Long Name",
-  "role": null,
+  "role": "CLIENT",
   "hwModel": null,
   "firmware": null,
   "snr": 1.0,
