@@ -300,6 +300,29 @@ def test_stats_db_message_history_persists():
     assert msgs[0]["channel"] == 0
 
 
+def test_stats_db_list_messages_order_and_offset():
+    db = StatsDB(":memory:")
+    for rx in [1, 2, 3]:
+        db.record_message(
+            {
+                "rxTime": rx,
+                "fromId": f"!n{rx}",
+                "toId": "!x",
+                "snr": 1,
+                "rssi": -90,
+                "portnum": 1,
+                "text": f"m{rx}",
+                "payload_b64": None,
+            }
+        )
+
+    asc = db.list_messages(limit=2, offset=1, order="asc")
+    assert [m["rxTime"] for m in asc] == [2, 3]
+
+    desc = db.list_messages(limit=2, offset=0, order="desc")
+    assert [m["rxTime"] for m in desc] == [3, 2]
+
+
 def test_stats_db_node_history_records_quality():
     db = StatsDB(":memory:")
     now = now_epoch()
@@ -399,3 +422,23 @@ def test_stats_db_records_status_report():
     assert latest["utilizationTx"] == 0.287805557250977
     assert latest["wifiIp"] == "192.168.8.137"
     assert latest["wifiRssi"] == -68
+
+
+def test_stats_db_status_history_interval_blocks_frequent_writes():
+    db = StatsDB(":memory:", status_history_interval_sec=60)
+    report = {"power": {"battery_percent": 50}}
+    db.record_status_report(report)
+    db.record_status_report(report)
+    items = db.list_status_reports(limit=10, order="asc")
+    assert len(items) == 1
+
+
+def test_stats_db_list_status_reports_ordering():
+    db = StatsDB(":memory:", status_history_interval_sec=0)
+    for pct in [10, 20, 30]:
+        db.record_status_report({"power": {"battery_percent": pct}})
+
+    asc = db.list_status_reports(limit=3, order="asc")
+    desc = db.list_status_reports(limit=3, order="desc")
+    assert [i["batteryPercent"] for i in asc] == [10, 20, 30]
+    assert [i["batteryPercent"] for i in desc] == [30, 20, 10]

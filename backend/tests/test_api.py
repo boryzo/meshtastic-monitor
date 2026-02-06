@@ -108,6 +108,21 @@ def test_status_endpoint_returns_report():
     assert body["report"]["wifi"]["ip"] == "192.168.1.10"
 
 
+def test_status_endpoint_handles_missing_report():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.get("/api/status")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is True
+    assert body["reportOk"] is False
+    assert body["report"] is None
+
+
 def test_health_configured_false_when_mesh_host_empty():
     svc = FakeMeshService()
     svc.start()
@@ -300,6 +315,22 @@ def test_nodes_history_endpoint(client):
     assert body2["nodeId"] == "!direct"
 
 
+def test_nodes_history_returns_503_when_stats_disabled():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=None)
+    app.testing = True
+    c = app.test_client()
+
+    res = c.get("/api/nodes/history")
+    assert res.status_code == 503
+    assert res.get_json()["ok"] is False
+
+    res2 = c.get("/api/node/!x/history")
+    assert res2.status_code == 503
+    assert res2.get_json()["ok"] is False
+
+
 def test_messages_returns_list(client):
     res = client.get("/api/messages")
     assert res.status_code == 200
@@ -312,6 +343,53 @@ def test_messages_returns_list(client):
     body2 = res2.get_json()
     assert len(body2) == 1
 
+
+def test_messages_pagination_and_order():
+    svc = FakeMeshService()
+    svc.start()
+    db = StatsDB(":memory:")
+    for rx in [10, 20, 30]:
+        db.record_message(
+            {
+                "rxTime": rx,
+                "fromId": f"!n{rx}",
+                "toId": "!x",
+                "snr": 1,
+                "rssi": -100,
+                "portnum": 1,
+                "text": f"m{rx}",
+                "payload_b64": None,
+            }
+        )
+    app = create_app(mesh_service=svc, stats_db=db)
+    app.testing = True
+    c = app.test_client()
+
+    asc = c.get("/api/messages?limit=2&offset=1&order=asc").get_json()
+    assert [m["rxTime"] for m in asc] == [20, 30]
+
+    desc = c.get("/api/messages?limit=2&offset=0&order=desc").get_json()
+    assert [m["rxTime"] for m in desc] == [30, 20]
+
+
+def test_messages_fallback_when_stats_disabled():
+    svc = FakeMeshService()
+    svc.start()
+    svc.seed_messages(
+        [
+            {"rxTime": 1, "fromId": "!a", "toId": "!b", "text": "hi"},
+            {"rxTime": 2, "fromId": "!c", "toId": "!d", "text": "yo"},
+        ]
+    )
+    app = create_app(mesh_service=svc, stats_db=None)
+    app.testing = True
+    c = app.test_client()
+
+    body = c.get("/api/messages").get_json()
+    assert len(body) == 2
+    assert body[0]["text"] == "hi"
+    assert body[1]["text"] == "yo"
+
 def test_stats_ok(client):
     res = client.get("/api/stats")
     assert res.status_code == 200
@@ -322,6 +400,19 @@ def test_stats_ok(client):
     assert "apps" in body
     assert "counts" in body["apps"]
     assert "requestsToMe" in body["apps"]
+
+
+def test_stats_returns_503_when_disabled():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=None)
+    app.testing = True
+    c = app.test_client()
+
+    res = c.get("/api/stats")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is False
 
 
 def test_send_requires_text(client):
@@ -406,6 +497,13 @@ def test_config_mqtt_ok_and_visible_in_health(client):
     assert h["mqttUsername"] == "u"
     assert h["mqttTls"] is True
     assert h["mqttPasswordSet"] is True
+
+
+def test_config_accepts_mqtt_tls_string(client):
+    res = client.post("/api/config", json={"mqttTls": "1"})
+    assert res.status_code == 200
+    h = client.get("/api/health").get_json()
+    assert h["mqttTls"] is True
 
 
 def test_config_rejects_bad_types_and_values(client):

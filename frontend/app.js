@@ -340,7 +340,7 @@ function renderStatus(h) {
   overview.push(kv("Transport", String(h.transport || "—")));
   overview.push(kv("Mesh", h.meshHost ? `${h.meshHost}:${h.meshPort}` : "—"));
   overview.push(kv("Report", h.reportOk ? (h.reportStatus || "ok") : "unavailable"));
-  if (h.reportUrl) overview.push(kv("URL", h.reportUrl));
+  if (h.reportUrl) overview.push(kvLink("JSON", h.reportUrl, "/json/report"));
   if (h.lastError) overview.push(kv("Last error", String(h.lastError), true));
   $("statusOverview").innerHTML = overview.join("");
 
@@ -421,6 +421,11 @@ function renderStatusError(e) {
 }
 function kv(key, value, isErr = false) {
   return `<div class="k">${escapeHtml(key)}</div><div class="v${isErr ? " err" : ""}">${escapeHtml(value)}</div>`;
+}
+function kvLink(key, href, label) {
+  const safeHref = escapeHtml(href || "");
+  const safeLabel = escapeHtml(label || href || "—");
+  return `<div class="k">${escapeHtml(key)}</div><div class="v"><a href="${safeHref}" target="_blank" rel="noreferrer">${safeLabel}</a></div>`;
 }
 function fmtNum(val, digits = 2) {
   if (val === null || val === undefined) return "—";
