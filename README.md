@@ -1,197 +1,166 @@
-# Meshtastic Monitor (simple)
+# Meshtastic Monitor
 
-A small, clean monitoring UI + JSON API for a Meshtastic network reachable over **TCP** (direct to node, default `4403`).
+A tiny web dashboard + JSON API for **Meshtastic over TCP** (direct to your node, default port `4403`).
 
-## Start in 2 minutes (the simple way)
+## What you need (before you start)
+
+1. A Meshtastic node reachable over Wi‑Fi (you know its IP/hostname, e.g. `192.168.8.137`)
+2. Python `3.9+`
+
+## Start (2 minutes)
+
+### 1) Install (one time)
 
 ```bash
 pip install meshtastic-monitor
+```
+
+### 2) Run
+
+```bash
 python -m meshtastic_monitor --host YOUR_MESH_IP
 ```
 
 Then open:
 
 - UI: `http://localhost:8880/`
-- API health: `http://localhost:8880/api/health`
+- Health (JSON): `http://localhost:8880/api/health`
 
-That’s it. You can also configure the IP/port later in **Settings** inside the UI.
+If you run this on another computer in your LAN, open:
 
-Tip (running from a git checkout, without publishing): `pip install -r meshtastic-monitor`
+- `http://SERVER_IP:8880/`
 
-## Features
+### 3) Stop
 
-- **Backend (data layer)**: Python + Flask + `meshtastic` TCP client, robust reconnect, JSON-safe endpoints
-- **Frontend (view layer)**: Vanilla HTML/CSS/JS that talks only to the JSON API
-- **No bytes in JSON**: binary payload is base64-encoded (`payload_b64`)
+Press `Ctrl+C` in the terminal where it is running.
 
-## Repo layout
+## Configure (if you didn’t pass `--host`)
 
-```
-backend/
-  app.py
-  jsonsafe.py
-  mesh_service.py
-  requirements.txt
-  requirements-dev.txt
-  tests/
-meshtastic-monitor
-frontend/
-  index.html
-  app.js
-  styles.css
-meshtastic_monitor/
-setup.cfg
-setup.py
-pyproject.toml
-```
+1. Open the UI
+2. Click **Settings**
+3. Put your Meshtastic IP/host + port (`4403`)
+4. Click **Save & Apply**
 
-## Install
+The UI stores these settings in your browser (`localStorage`).
+
+## Command-line options (copy/paste)
+
+Show all options:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python -m meshtastic_monitor --help
+```
+
+Most used:
+
+- `--host` / `--mesh-host` (Meshtastic IP/hostname)
+- `--mesh-port` (default `4403`)
+- `--http-port` (default `8880`)
+- `--nodes-history-interval` (default `60` seconds)
+
+You can also set env vars instead of flags:
+
+- `MESH_HOST` (default empty; can also be set via UI)
+- `MESH_PORT` (default `4403`)
+- `HTTP_PORT` (default `8880` when using `python -m meshtastic_monitor`)
+- `NODES_REFRESH_SEC` (default `5`) refresh live node snapshot
+- `MAX_MESSAGES` (default `200`) in-memory ring buffer size
+- `STATS_DB_PATH` (default `meshmon.db`, set to `off` to disable persistence)
+- `NODES_HISTORY_INTERVAL_SEC` (default `60`) how often to store node history samples
+- `STATUS_HISTORY_INTERVAL_SEC` (default `60`) how often to store status samples
+- `STATS_WINDOW_HOURS` (default `24`) used by `/api/stats`
+- `MESH_HTTP_PORT` (default `80`) for `http://MESH_HOST[:port]/json/report`
+- `STATUS_TTL_SEC` (default `5`) cache `/json/report` for this many seconds
+- `LOG_LEVEL` (default `INFO`)
+
+## How it works (simple mental model)
+
+### Two layers
+
+1. **Backend (Python/Flask)** exposes JSON endpoints under `/api/*` and serves the UI.
+2. **Frontend (HTML/JS)** is just static files that poll the JSON API.
+
+### What it connects to
+
+- Meshtastic **TCP** interface (library: `meshtastic`, class: `TCPInterface`)
+- Your node’s optional HTTP status endpoint: `http://<mesh-host>/json/report`
+
+### Data flow (incoming packets)
+
+1. Backend connects to your node over TCP (`MESH_HOST:MESH_PORT`)
+2. The `meshtastic` library publishes received packets on `meshtastic.receive` (via `pypubsub`)
+3. We convert every packet to a **thin, JSON-safe** dict (no raw `bytes`) and:
+   - keep the last `MAX_MESSAGES` in memory
+   - store everything in SQLite (if enabled)
+
+### Nodes
+
+- Live node list comes from the Meshtastic node DB (`iface.nodes`)
+- Node history is sampled to the DB every `NODES_HISTORY_INTERVAL_SEC` seconds (default `60`) to avoid DB explosion
+
+### Status (“/json/report”)
+
+- The UI shows a nice summary of `http://<mesh-host>/json/report` (if your node exposes it)
+- Backend caches it for `STATUS_TTL_SEC` and stores a compact subset in SQLite every `STATUS_HISTORY_INTERVAL_SEC`
+
+## Persistence (history / database)
+
+By default, the app creates a SQLite file:
+
+- `meshmon.db`
+
+It stores:
+
+- message history (so you can scroll back)
+- per-node counters (`fromCount`, `toCount`, last RSSI/SNR, etc.)
+- node “quality over time” samples (SNR/quality/hops/lastHeard)
+- mesh connect/disconnect/error events
+- compact status samples (battery/utilization/wifi/etc.)
+
+To disable persistence:
+
+```bash
+export STATS_DB_PATH=off
+python -m meshtastic_monitor --host YOUR_MESH_IP
+```
+
+To reset history: stop the app and delete `meshmon.db`.
+
+## Security notes (important)
+
+- There is **no login/auth**. Run this only on a trusted network.
+- `GET /api/device/config` redacts PSKs by default.
+  - `GET /api/device/config?includeSecrets=1` will include secrets — do this only if you understand the risk.
+
+## API (for developers)
+
+Quick overview:
+
+- `GET /api/health` – backend status + mesh connection status
+- `GET /api/status` – cached `/json/report` + link to the JSON
+- `GET /api/nodes` – live nodes (direct + relayed)
+- `GET /api/messages` – message history (SQLite if enabled, else memory)
+- `POST /api/send` – send text (optional `to` and `channel`)
+- `GET /api/stats` – aggregates + charts data
+- `GET /api/node/<id>` – combined live + persisted stats for one node
+- `GET /api/nodes/history` / `GET /api/node/<id>/history` – history samples
+
+Example:
+
+```bash
+curl -s http://localhost:8880/api/health
+curl -s http://localhost:8880/api/nodes
+curl -s http://localhost:8880/api/messages?limit=20
+curl -s -X POST http://localhost:8880/api/send -H 'Content-Type: application/json' -d '{"text":"hello","channel":0}'
+```
+
+## Development (optional)
+
+From a git checkout:
+
+```bash
 pip install -U pip
 pip install -e .
-```
-
-## Run
-
-### Recommended
-
-```bash
-python -m meshtastic_monitor
-```
-
-You will be prompted for host/ports if not provided. Then open `http://localhost:8880/`.
-
-### Manual (env vars, backend directly)
-
-```bash
-# Optional: set here, or configure it in the UI Settings.
-export MESH_HOST=your-mesh-host
-export MESH_PORT=4403
-export HTTP_PORT=8880
-python3 -m backend.app
-```
-
-Then open:
-
-- UI: `http://localhost:8880/`
-- Health: `http://localhost:8880/api/health`
-
-### Backend config
-
-- Env vars:
-- `MESH_HOST` (default empty; set via env or the UI)
-- `MESH_PORT` (default `4403`)
-  - `HTTP_PORT` (default `8080`)
-  - `NODES_REFRESH_SEC` (default `5`)
-  - `MAX_MESSAGES` (default `200`)
-  - `STATS_DB_PATH` (default `meshmon.db`, set to `off` to disable)
-  - `STATS_WINDOW_HOURS` (default `24`) used by `/api/stats`
-  - `NODES_HISTORY_INTERVAL_SEC` (default `60`, set `0` to store every snapshot)
-- Optional runtime update (used by the UI Settings modal):
-  - `POST /api/config` (partial updates allowed), e.g. `{ "meshHost":"...", "meshPort":4403 }`
-  - Settings modal also supports **Export Config** (downloads a JSON snapshot including device config)
-
-## API
-
-### `GET /api/health`
-
-```json
-{
-  "ok": true,
-  "configured": true,
-  "meshHost": "your-mesh-host",
-  "meshPort": 4403,
-  "connected": true,
-  "generatedAt": 1730000000
-}
-```
-
-### `GET /api/nodes`
-
-Returns direct + relayed nodes (sorted by freshness; lowest `ageSec` first).
-
-### `GET /api/nodes/history`
-
-Returns history snapshots for all nodes (from SQLite). Query params:
-
-- `nodeId` (optional, filter by node)
-- `limit` (default `500`, use `0` for all)
-- `since` (epoch seconds, optional)
-- `order` (`asc` or `desc`, default `desc`)
-
-### `GET /api/messages`
-
-Returns a list of messages from the persistent history (SQLite). **Ordering: newest last (chronological).**
-Query params:
-
-- `limit` (default `200`, use `0` for all)
-- `offset` (default `0`)
-- `order` (`asc` or `desc`, default `asc`)
-
-History is stored when `STATS_DB_PATH` is enabled (default `meshmon.db`).
-
-### `GET /api/channels`
-
-Returns configured channels (if available from the active interface). Secrets/PSKs are never included.
-
-### `GET /api/radio`
-
-Returns a JSON-safe snapshot of **your local radio** (id, names, hops, metrics, position when available).
-
-### `GET /api/device/config`
-
-Returns the full device configuration (local + module config, channels, metadata, myInfo).
-Use `?includeSecrets=1` to include channel PSKs; default redacts PSKs.
-
-### `GET /api/stats`
-
-Returns persisted counters and simple aggregates (SQLite at `STATS_DB_PATH`), including:
-
-- message totals + per-hour buckets (`messages.windowHours`, `messages.hourlyWindow`)
-- app appearance counts (`apps.counts`) for Position/NodeInfo/Telemetry/Routing
-- requesters targeting you or broadcast (`apps.requestsToMe`)
-- top talkers (`nodes.topFrom`, `nodes.topTo`)
-- recent mesh/connectivity events (`events`)
-
-### `GET /api/node/<id>`
-
-Returns a combined view of live node data + persisted stats for a single node.
-
-### `GET /api/node/<id>/history`
-
-Returns history snapshots for one node (from SQLite). Query params:
-
-- `limit` (default `500`, use `0` for all)
-- `since` (epoch seconds, optional)
-- `order` (`asc` or `desc`, default `desc`)
-
-### `POST /api/send`
-
-Body:
-
-```json
-{ "text": "hello", "to": "!abcd1234", "channel": 0 }
-```
-
-## Curl examples
-
-```bash
-curl -s http://localhost:8080/api/health | jq
-curl -s http://localhost:8080/api/nodes | jq
-curl -s http://localhost:8080/api/messages | jq
-curl -s -X POST http://localhost:8080/api/send \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"hello from curl"}' | jq
-```
-
-## Tests
-
-The test suite uses a fake mesh service (no Meshtastic device required).
-
-```bash
 pip install -r backend/requirements-dev.txt
-pytest
+pytest -q
 ```
