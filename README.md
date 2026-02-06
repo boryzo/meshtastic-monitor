@@ -5,30 +5,18 @@ A small, clean monitoring UI + JSON API for a Meshtastic network reachable over 
 ## Start in 2 minutes (the simple way)
 
 ```bash
-chmod +x run.sh
-./run.sh --host YOUR_MESH_IP
+pip install meshtastic-monitor
+python -m meshtastic_monitor --host YOUR_MESH_IP
 ```
 
 Then open:
 
-- UI: `http://localhost:8080/`
-- API health: `http://localhost:8080/api/health`
+- UI: `http://localhost:8880/`
+- API health: `http://localhost:8880/api/health`
 
 That’s it. You can also configure the IP/port later in **Settings** inside the UI.
 
-## Install via pip (simple)
-
-```bash
-pip install -r meshtastic-monitor
-```
-
-Run:
-
-```bash
-python -m meshtastic_monitor
-```
-
-You will be prompted for host/ports if not provided. Then open `http://localhost:8880/`.
+Tip (running from a git checkout, without publishing): `pip install -r meshtastic-monitor`
 
 ## Features
 
@@ -51,6 +39,10 @@ frontend/
   index.html
   app.js
   styles.css
+meshtastic_monitor/
+setup.cfg
+setup.py
+pyproject.toml
 ```
 
 ## Install
@@ -58,47 +50,34 @@ frontend/
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r backend/requirements.txt
+pip install -U pip
+pip install -e .
 ```
 
 ## Run
 
-### One command (optional)
+### Recommended
 
 ```bash
-chmod +x run.sh
-./run.sh
+python -m meshtastic_monitor
 ```
 
-This will:
+You will be prompted for host/ports if not provided. Then open `http://localhost:8880/`.
 
-- create `.venv/` (if missing)
-- install Python dependencies
-- (optional) verify target is reachable (Meshtastic TCP)
-- start the backend (which also serves the UI)
-
-Then open `http://localhost:8080/` and set the Meshtastic host/port in **Settings**.
-
-Options:
-
-- `./run.sh --host your-mesh-host --mesh-port 4403 --http-port 8080`
-- `./run.sh --nodes-history-interval 60` (store node history every 60s)
-- `./run.sh --no-check` (start even if reachability check fails)
-
-### Manual (env vars)
+### Manual (env vars, backend directly)
 
 ```bash
 # Optional: set here, or configure it in the UI Settings.
 export MESH_HOST=your-mesh-host
 export MESH_PORT=4403
-export HTTP_PORT=8080
+export HTTP_PORT=8880
 python3 -m backend.app
 ```
 
 Then open:
 
-- UI: `http://localhost:8080/`
-- Health: `http://localhost:8080/api/health`
+- UI: `http://localhost:8880/`
+- Health: `http://localhost:8880/api/health`
 
 ### Backend config
 
