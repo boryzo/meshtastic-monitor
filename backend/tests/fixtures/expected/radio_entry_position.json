@@ -15,7 +15,6 @@
   "isIgnored": null,
   "isMuted": null,
   "isKeyManuallyVerified": null,
-  "viaMqtt": null,
   "channel": null,
   "batteryLevel": null,
   "voltage": null,

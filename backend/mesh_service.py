@@ -16,29 +16,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class MeshConfig:
-    transport: str
     mesh_host: str
     mesh_port: int = 4403
-    mqtt_host: str = "mqtt.meshtastic.org"
-    mqtt_port: int = 1883
-    mqtt_username: Optional[str] = None
-    mqtt_password: Optional[str] = None
-    mqtt_tls: bool = False
-    mqtt_root_topic: Optional[str] = None
-
-
-def _normalize_transport(value: Any) -> str:
-    t = str(value or "tcp").strip().lower()
-    if t in {"tcp", "meshtastic-tcp"}:
-        return "tcp"
-    if t in {"mqtt", "meshtastic-mqtt"}:
-        return "mqtt"
-    raise ValueError("transport must be 'tcp' or 'mqtt'")
 
 
 class MeshService:
     """
-    Maintains a Meshtastic connection (TCP or MQTT) in a background thread.
+    Maintains a Meshtastic TCP connection in a background thread.
     Stores:
       - nodeDB snapshot (raw dict from meshtastic)
       - JSON-safe message ring buffer (thin model)
@@ -49,13 +33,6 @@ class MeshService:
         mesh_host: str,
         mesh_port: int = 4403,
         *,
-        transport: str = "tcp",
-        mqtt_host: str = "mqtt.meshtastic.org",
-        mqtt_port: int = 1883,
-        mqtt_username: Optional[str] = None,
-        mqtt_password: Optional[str] = None,
-        mqtt_tls: bool = False,
-        mqtt_root_topic: Optional[str] = None,
         nodes_refresh_sec: int = 5,
         max_messages: int = 200,
         stats_db: Optional[Any] = None,
@@ -68,21 +45,9 @@ class MeshService:
         if mesh_port_int <= 0 or mesh_port_int > 65535:
             raise ValueError("meshPort must be 1..65535")
 
-        mqtt_host = str(mqtt_host or "").strip() or "mqtt.meshtastic.org"
-        mqtt_port_int = int(mqtt_port)
-        if mqtt_port_int <= 0 or mqtt_port_int > 65535:
-            raise ValueError("mqttPort must be 1..65535")
-
         self._cfg = MeshConfig(
-            transport=_normalize_transport(transport),
             mesh_host=mesh_host,
             mesh_port=mesh_port_int,
-            mqtt_host=mqtt_host,
-            mqtt_port=mqtt_port_int,
-            mqtt_username=(str(mqtt_username).strip() if mqtt_username else None),
-            mqtt_password=(str(mqtt_password) if mqtt_password else None),
-            mqtt_tls=bool(mqtt_tls),
-            mqtt_root_topic=(str(mqtt_root_topic).strip() if mqtt_root_topic else None),
         )
         self._nodes_refresh_sec = max(1, int(nodes_refresh_sec))
         self._max_messages = max(1, int(max_messages))
@@ -134,33 +99,17 @@ class MeshService:
     def get_config(self) -> MeshConfig:
         cfg = self._cfg
         return MeshConfig(
-            transport=cfg.transport,
             mesh_host=cfg.mesh_host,
             mesh_port=cfg.mesh_port,
-            mqtt_host=cfg.mqtt_host,
-            mqtt_port=cfg.mqtt_port,
-            mqtt_username=cfg.mqtt_username,
-            mqtt_password=cfg.mqtt_password,
-            mqtt_tls=cfg.mqtt_tls,
-            mqtt_root_topic=cfg.mqtt_root_topic,
         )
 
     def reconfigure(
         self,
         *,
-        transport: Optional[str] = None,
         mesh_host: Optional[str] = None,
         mesh_port: Optional[int] = None,
-        mqtt_host: Optional[str] = None,
-        mqtt_port: Optional[int] = None,
-        mqtt_username: Optional[str] = None,
-        mqtt_password: Optional[str] = None,
-        mqtt_tls: Optional[bool] = None,
-        mqtt_root_topic: Optional[str] = None,
     ) -> None:
         cfg = self._cfg
-
-        next_transport = cfg.transport if transport is None else _normalize_transport(transport)
 
         next_mesh_host = cfg.mesh_host
         if mesh_host is not None:
@@ -176,72 +125,21 @@ class MeshService:
                 raise ValueError("meshPort must be 1..65535")
             next_mesh_port = port_int
 
-        next_mqtt_host = cfg.mqtt_host
-        if mqtt_host is not None:
-            mqtt_host_clean = str(mqtt_host).strip()
-            if not mqtt_host_clean:
-                raise ValueError("mqttHost must be non-empty")
-            next_mqtt_host = mqtt_host_clean
-
-        next_mqtt_port = cfg.mqtt_port
-        if mqtt_port is not None:
-            port_int = int(mqtt_port)
-            if port_int <= 0 or port_int > 65535:
-                raise ValueError("mqttPort must be 1..65535")
-            next_mqtt_port = port_int
-
-        next_mqtt_username = cfg.mqtt_username
-        if mqtt_username is not None:
-            u = str(mqtt_username).strip()
-            next_mqtt_username = u if u else None
-
-        next_mqtt_password = cfg.mqtt_password
-        if mqtt_password is not None:
-            p = str(mqtt_password)
-            next_mqtt_password = p if p else None
-
-        next_mqtt_tls = cfg.mqtt_tls if mqtt_tls is None else bool(mqtt_tls)
-
-        next_mqtt_root_topic = cfg.mqtt_root_topic
-        if mqtt_root_topic is not None:
-            t = str(mqtt_root_topic).strip()
-            next_mqtt_root_topic = t if t else None
-
-        if next_transport == "mqtt" and not next_mqtt_host:
-            raise ValueError("mqttHost must be set when transport='mqtt'")
-
         changed = (
-            (next_transport != cfg.transport)
-            or (next_mesh_host != cfg.mesh_host)
+            (next_mesh_host != cfg.mesh_host)
             or (next_mesh_port != cfg.mesh_port)
-            or (next_mqtt_host != cfg.mqtt_host)
-            or (next_mqtt_port != cfg.mqtt_port)
-            or (next_mqtt_username != cfg.mqtt_username)
-            or (next_mqtt_password != cfg.mqtt_password)
-            or (next_mqtt_tls != cfg.mqtt_tls)
-            or (next_mqtt_root_topic != cfg.mqtt_root_topic)
         )
 
         self._cfg = MeshConfig(
-            transport=next_transport,
             mesh_host=next_mesh_host,
             mesh_port=next_mesh_port,
-            mqtt_host=next_mqtt_host,
-            mqtt_port=next_mqtt_port,
-            mqtt_username=next_mqtt_username,
-            mqtt_password=next_mqtt_password,
-            mqtt_tls=next_mqtt_tls,
-            mqtt_root_topic=next_mqtt_root_topic,
         )
 
         if changed:
             logger.info(
-                "Reconfiguring mesh transport=%s tcp=%s:%s mqtt=%s:%s",
-                next_transport,
+                "Reconfiguring mesh tcp=%s:%s",
                 next_mesh_host,
                 next_mesh_port,
-                next_mqtt_host,
-                next_mqtt_port,
             )
             self._record_mesh_event("disconnect", "reconfigure")
             self._disconnect()
@@ -451,65 +349,7 @@ class MeshService:
 
     def _target_str(self) -> str:
         cfg = self._cfg
-        if cfg.transport == "mqtt":
-            return f"mqtt {cfg.mqtt_host}:{cfg.mqtt_port}"
         return f"tcp {cfg.mesh_host}:{cfg.mesh_port}"
-
-    def _create_mqtt_iface(self) -> Any:
-        cfg = self._cfg
-
-        try:
-            from meshtastic.mqtt_interface import MQTTInterface  # type: ignore
-        except Exception as e:  # pragma: no cover
-            raise RuntimeError(
-                "Meshtastic MQTT support not available in this environment"
-            ) from e
-
-        attempts: List[Dict[str, Any]] = [
-            {
-                "hostname": cfg.mqtt_host,
-                "portNumber": cfg.mqtt_port,
-                "username": cfg.mqtt_username,
-                "password": cfg.mqtt_password,
-                "useTls": cfg.mqtt_tls,
-                "rootTopic": cfg.mqtt_root_topic,
-            },
-            {
-                "hostname": cfg.mqtt_host,
-                "port": cfg.mqtt_port,
-                "username": cfg.mqtt_username,
-                "password": cfg.mqtt_password,
-                "tls": cfg.mqtt_tls,
-                "rootTopic": cfg.mqtt_root_topic,
-            },
-            {
-                "mqttServer": cfg.mqtt_host,
-                "mqttPort": cfg.mqtt_port,
-                "username": cfg.mqtt_username,
-                "password": cfg.mqtt_password,
-            },
-            {
-                "server": cfg.mqtt_host,
-                "port": cfg.mqtt_port,
-                "username": cfg.mqtt_username,
-                "password": cfg.mqtt_password,
-            },
-            {"hostname": cfg.mqtt_host, "portNumber": cfg.mqtt_port},
-            {"hostname": cfg.mqtt_host},
-        ]
-
-        last_err: Optional[Exception] = None
-        for kwargs in attempts:
-            kwargs = {k: v for k, v in kwargs.items() if v is not None}
-            try:
-                return MQTTInterface(**kwargs)
-            except TypeError as e:
-                last_err = e
-                continue
-
-        if last_err is not None:
-            raise last_err
-        raise RuntimeError("failed to create MQTT interface")
 
     def _connect(self) -> Any:
         with self._iface_lock:
@@ -532,17 +372,11 @@ class MeshService:
 
             logger.info("Connecting to mesh (%s)", self._target_str())
             cfg = self._cfg
-
-            if cfg.transport == "mqtt":
-                iface = self._create_mqtt_iface()
-            else:
-                try:
-                    iface = TCPInterface(
-                        hostname=cfg.mesh_host, portNumber=cfg.mesh_port
-                    )
-                except TypeError:
-                    # Older meshtastic versions may not accept portNumber
-                    iface = TCPInterface(hostname=cfg.mesh_host)
+            try:
+                iface = TCPInterface(hostname=cfg.mesh_host, portNumber=cfg.mesh_port)
+            except TypeError:
+                # Older meshtastic versions may not accept portNumber
+                iface = TCPInterface(hostname=cfg.mesh_host)
 
             self._iface = iface
             return iface
@@ -639,7 +473,7 @@ class MeshService:
         while not self._stop.is_set():
             try:
                 cfg = self._cfg
-                if cfg.transport == "tcp" and not cfg.mesh_host:
+                if not cfg.mesh_host:
                     self._set_connected(False)
                     self._set_error("not_configured: set meshHost")
                     time.sleep(0.5)
@@ -682,15 +516,8 @@ class FakeMeshService:
 
     def __init__(self) -> None:
         self._cfg = MeshConfig(
-            transport="tcp",
             mesh_host="localhost",
             mesh_port=4403,
-            mqtt_host="mqtt.meshtastic.org",
-            mqtt_port=1883,
-            mqtt_username=None,
-            mqtt_password=None,
-            mqtt_tls=False,
-            mqtt_root_topic=None,
         )
         self._connected = False
         self._nodes: Dict[str, Dict[str, Any]] = {}
@@ -712,27 +539,13 @@ class FakeMeshService:
     def reconfigure(
         self,
         *,
-        transport: Optional[str] = None,
         mesh_host: Optional[str] = None,
         mesh_port: Optional[int] = None,
-        mqtt_host: Optional[str] = None,
-        mqtt_port: Optional[int] = None,
-        mqtt_username: Optional[str] = None,
-        mqtt_password: Optional[str] = None,
-        mqtt_tls: Optional[bool] = None,
-        mqtt_root_topic: Optional[str] = None,
     ) -> None:
         cfg = self._cfg
         self._cfg = MeshConfig(
-            transport=cfg.transport if transport is None else _normalize_transport(transport),
             mesh_host=cfg.mesh_host if mesh_host is None else str(mesh_host),
             mesh_port=cfg.mesh_port if mesh_port is None else int(mesh_port),
-            mqtt_host=cfg.mqtt_host if mqtt_host is None else str(mqtt_host),
-            mqtt_port=cfg.mqtt_port if mqtt_port is None else int(mqtt_port),
-            mqtt_username=cfg.mqtt_username if mqtt_username is None else mqtt_username,
-            mqtt_password=cfg.mqtt_password if mqtt_password is None else mqtt_password,
-            mqtt_tls=cfg.mqtt_tls if mqtt_tls is None else bool(mqtt_tls),
-            mqtt_root_topic=cfg.mqtt_root_topic if mqtt_root_topic is None else mqtt_root_topic,
         )
 
     def is_connected(self) -> bool:

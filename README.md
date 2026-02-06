@@ -1,6 +1,6 @@
 # Meshtastic Monitor (simple)
 
-A small, clean monitoring UI + JSON API for a Meshtastic network reachable over **TCP** (direct to node, default `4403`) or optionally via **MQTT** (broker).
+A small, clean monitoring UI + JSON API for a Meshtastic network reachable over **TCP** (direct to node, default `4403`).
 
 ## Start in 2 minutes (the simple way)
 
@@ -16,9 +16,23 @@ Then open:
 
 That’s it. You can also configure the IP/port later in **Settings** inside the UI.
 
+## Install via pip (simple)
+
+```bash
+pip install -r meshtastic-monitor
+```
+
+Run:
+
+```bash
+python -m meshtastic_monitor
+```
+
+You will be prompted for host/ports if not provided. Then open `http://localhost:8880/`.
+
 ## Features
 
-- **Backend (data layer)**: Python + Flask + `meshtastic` TCP/MQTT client, robust reconnect, JSON-safe endpoints
+- **Backend (data layer)**: Python + Flask + `meshtastic` TCP client, robust reconnect, JSON-safe endpoints
 - **Frontend (view layer)**: Vanilla HTML/CSS/JS that talks only to the JSON API
 - **No bytes in JSON**: binary payload is base64-encoded (`payload_b64`)
 
@@ -32,6 +46,7 @@ backend/
   requirements.txt
   requirements-dev.txt
   tests/
+meshtastic-monitor
 frontend/
   index.html
   app.js
@@ -48,7 +63,7 @@ pip install -r backend/requirements.txt
 
 ## Run
 
-### One command (recommended)
+### One command (optional)
 
 ```bash
 chmod +x run.sh
@@ -59,7 +74,7 @@ This will:
 
 - create `.venv/` (if missing)
 - install Python dependencies
-- (optional) verify target is reachable (Meshtastic TCP or MQTT broker, depending on `--transport`)
+- (optional) verify target is reachable (Meshtastic TCP)
 - start the backend (which also serves the UI)
 
 Then open `http://localhost:8080/` and set the Meshtastic host/port in **Settings**.
@@ -67,7 +82,6 @@ Then open `http://localhost:8080/` and set the Meshtastic host/port in **Setting
 Options:
 
 - `./run.sh --host your-mesh-host --mesh-port 4403 --http-port 8080`
-- `./run.sh --transport mqtt --mqtt-host broker.example --mqtt-port 1883`
 - `./run.sh --nodes-history-interval 60` (store node history every 60s)
 - `./run.sh --no-check` (start even if reachability check fails)
 
@@ -77,14 +91,6 @@ Options:
 # Optional: set here, or configure it in the UI Settings.
 export MESH_HOST=your-mesh-host
 export MESH_PORT=4403
-export MESH_TRANSPORT=tcp   # or mqtt
-# MQTT_* env vars are used only when MESH_TRANSPORT=mqtt
-export MQTT_HOST=mqtt.meshtastic.org
-export MQTT_PORT=1883
-export MQTT_USERNAME=
-export MQTT_PASSWORD=
-export MQTT_TLS=0
-export MQTT_ROOT_TOPIC=
 export HTTP_PORT=8080
 python3 -m backend.app
 ```
@@ -97,15 +103,8 @@ Then open:
 ### Backend config
 
 - Env vars:
-  - `MESH_TRANSPORT` (`tcp` or `mqtt`, default `tcp`)
-  - `MESH_HOST` (default empty; set via env or the UI)
-  - `MESH_PORT` (default `4403`)
-  - `MQTT_HOST` (default `mqtt.meshtastic.org`)
-  - `MQTT_PORT` (default `1883`)
-  - `MQTT_USERNAME` (default empty)
-  - `MQTT_PASSWORD` (default empty)
-  - `MQTT_TLS` (`0/1`, default `0`)
-  - `MQTT_ROOT_TOPIC` (optional)
+- `MESH_HOST` (default empty; set via env or the UI)
+- `MESH_PORT` (default `4403`)
   - `HTTP_PORT` (default `8080`)
   - `NODES_REFRESH_SEC` (default `5`)
   - `MAX_MESSAGES` (default `200`)
@@ -113,8 +112,8 @@ Then open:
   - `STATS_WINDOW_HOURS` (default `24`) used by `/api/stats`
   - `NODES_HISTORY_INTERVAL_SEC` (default `60`, set `0` to store every snapshot)
 - Optional runtime update (used by the UI Settings modal):
-  - `POST /api/config` (partial updates allowed), e.g. `{ "transport":"tcp", "meshHost":"...", "meshPort":4403 }` or `{ "transport":"mqtt", "mqttHost":"...", "mqttPort":1883 }`
-  - Settings modal also supports **Export Config** (downloads a JSON snapshot including device config; MQTT password is never included)
+  - `POST /api/config` (partial updates allowed), e.g. `{ "meshHost":"...", "meshPort":4403 }`
+  - Settings modal also supports **Export Config** (downloads a JSON snapshot including device config)
 
 ## API
 
@@ -123,14 +122,9 @@ Then open:
 ```json
 {
   "ok": true,
-  "transport": "tcp",
   "configured": true,
   "meshHost": "your-mesh-host",
   "meshPort": 4403,
-  "mqttHost": "mqtt.meshtastic.org",
-  "mqttPort": 1883,
-  "mqttTls": false,
-  "mqttPasswordSet": false,
   "connected": true,
   "generatedAt": 1730000000
 }
@@ -162,7 +156,7 @@ History is stored when `STATS_DB_PATH` is enabled (default `meshmon.db`).
 
 ### `GET /api/channels`
 
-Returns configured channels (if available from the active transport/interface). Secrets/PSKs are never included.
+Returns configured channels (if available from the active interface). Secrets/PSKs are never included.
 
 ### `GET /api/radio`
 

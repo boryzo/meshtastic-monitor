@@ -242,16 +242,7 @@
           <div class="hint">Leave blank when using the built-in UI.</div>
         </div>
 
-        <div class="field">
-          <label for="transportSelect">Connection</label>
-          <select id="transportSelect" class="input">
-            <option value="tcp">TCP (direct to node)</option>
-            <option value="mqtt">MQTT (broker)</option>
-          </select>
-          <div class="hint">TCP is recommended for a local node.</div>
-        </div>
-
-        <div id="tcpSettings" class="row">
+        <div class="row">
           <div class="field">
             <label for="meshHostInput">Meshtastic IP / Host</label>
             <input id="meshHostInput" class="input" placeholder="your-mesh-host" />
@@ -259,46 +250,6 @@
           <div class="field">
             <label for="meshPortInput">Port</label>
             <input id="meshPortInput" class="input" placeholder="4403" inputmode="numeric" />
-          </div>
-        </div>
-
-        <div id="mqttSettings" class="hidden">
-          <div class="row">
-            <div class="field">
-              <label for="mqttHostInput">MQTT Host</label>
-              <input id="mqttHostInput" class="input" placeholder="mqtt.meshtastic.org" />
-            </div>
-            <div class="field">
-              <label for="mqttPortInput">MQTT Port</label>
-              <input id="mqttPortInput" class="input" placeholder="1883" inputmode="numeric" />
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="field">
-              <label for="mqttUsernameInput">MQTT Username (optional)</label>
-              <input id="mqttUsernameInput" class="input" placeholder="username" />
-            </div>
-            <div class="field">
-              <label for="mqttPasswordInput">MQTT Password (optional)</label>
-              <input id="mqttPasswordInput" class="input" type="password" placeholder="password" />
-              <div class="hint">If left blank, password is not changed on the backend.</div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="field">
-              <label for="mqttRootTopicInput">MQTT Root Topic (optional)</label>
-              <input id="mqttRootTopicInput" class="input" placeholder="msh/#" />
-              <div class="hint">Leave blank to use library defaults.</div>
-            </div>
-            <div class="field">
-              <label for="mqttTlsInput">TLS</label>
-              <label class="check">
-                <input id="mqttTlsInput" type="checkbox" />
-                <span>Use TLS</span>
-              </label>
-            </div>
           </div>
         </div>
       </div>

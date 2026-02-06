@@ -1,15 +1,8 @@
 /* global window, document, localStorage, fetch */
 const LS = {
   apiBaseUrl: "meshmon.apiBaseUrl",
-  transport: "meshmon.transport",
   meshHost: "meshmon.meshHost",
   meshPort: "meshmon.meshPort",
-  mqttHost: "meshmon.mqttHost",
-  mqttPort: "meshmon.mqttPort",
-  mqttUsername: "meshmon.mqttUsername",
-  mqttPassword: "meshmon.mqttPassword",
-  mqttTls: "meshmon.mqttTls",
-  mqttRootTopic: "meshmon.mqttRootTopic",
   sendChannel: "meshmon.sendChannel",
   messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
@@ -309,12 +302,10 @@ async function tickStatus() {
   try {
     const h = await apiFetch("/api/status");
     lastStatus = h;
-    if (h.transport === "mqtt") {
-      $("meshHost").textContent = `MQTT ${h.mqttHost || "—"}:${h.mqttPort || "—"}`;
-    } else if (h.meshHost) {
+    if (h.meshHost) {
       $("meshHost").textContent = `${h.meshHost}:${h.meshPort}`;
     } else {
-      $("meshHost").textContent = "TCP (not configured)";
+      $("meshHost").textContent = "Not configured";
     }
     if (h.configured === false) {
       setConnStatus(null);
@@ -337,7 +328,6 @@ function renderStatus(h) {
     h.configured === false ? "Not configured" : h.connected ? "Connected" : "Disconnected";
   const overview = [];
   overview.push(kv("Connection", statusText));
-  overview.push(kv("Transport", String(h.transport || "—")));
   overview.push(kv("Mesh", h.meshHost ? `${h.meshHost}:${h.meshPort}` : "—"));
   overview.push(kv("Report", h.reportOk ? (h.reportStatus || "ok") : "unavailable"));
   if (h.reportUrl) overview.push(kvLink("JSON", h.reportUrl, "/json/report"));
@@ -597,7 +587,6 @@ function renderRadio(data) {
   rows.push(kv("Favorite", fmtBool(node.isFavorite)));
   rows.push(kv("Muted", fmtBool(node.isMuted)));
   rows.push(kv("Ignored", fmtBool(node.isIgnored)));
-  rows.push(kv("Via MQTT", fmtBool(node.viaMqtt)));
   if (node.position) {
     const lat = node.position.latitude !== undefined ? fmtNum(node.position.latitude, 5) : "—";
     const lon = node.position.longitude !== undefined ? fmtNum(node.position.longitude, 5) : "—";
@@ -1194,83 +1183,35 @@ function openModal() {
   $("modal").classList.remove("hidden");
   $("modalBackdrop").setAttribute("aria-hidden", "false");
   $("apiBaseUrl").value = localStorage.getItem(LS.apiBaseUrl) || "";
-  $("transportSelect").value = localStorage.getItem(LS.transport) || "tcp";
   $("meshHostInput").value = localStorage.getItem(LS.meshHost) || "";
   $("meshPortInput").value = localStorage.getItem(LS.meshPort) || "4403";
-  $("mqttHostInput").value = localStorage.getItem(LS.mqttHost) || "";
-  $("mqttPortInput").value = localStorage.getItem(LS.mqttPort) || "1883";
-  $("mqttUsernameInput").value = localStorage.getItem(LS.mqttUsername) || "";
-  $("mqttPasswordInput").value = localStorage.getItem(LS.mqttPassword) || "";
-  $("mqttTlsInput").checked = (localStorage.getItem(LS.mqttTls) || "") === "1";
-  $("mqttRootTopicInput").value = localStorage.getItem(LS.mqttRootTopic) || "";
-  applyTransportUi();
 }
 function closeModal() {
   $("modalBackdrop").classList.add("hidden");
   $("modal").classList.add("hidden");
   $("modalBackdrop").setAttribute("aria-hidden", "true");
 }
-function applyTransportUi() {
-  const transport = ($("transportSelect").value || "tcp").toLowerCase();
-  if (transport === "mqtt") {
-    $("tcpSettings").classList.add("hidden");
-    $("mqttSettings").classList.remove("hidden");
-  } else {
-    $("mqttSettings").classList.add("hidden");
-    $("tcpSettings").classList.remove("hidden");
-  }
-}
 async function saveSettings() {
   const apiBaseUrl = ($("apiBaseUrl").value || "").trim();
-  const transport = ($("transportSelect").value || "tcp").trim().toLowerCase();
   const meshHost = ($("meshHostInput").value || "").trim();
   const meshPort = ($("meshPortInput").value || "").trim();
-  const mqttHost = ($("mqttHostInput").value || "").trim();
-  const mqttPort = ($("mqttPortInput").value || "").trim();
-  const mqttUsername = ($("mqttUsernameInput").value || "").trim();
-  const mqttPassword = ($("mqttPasswordInput").value || "").trim();
-  const mqttTls = $("mqttTlsInput").checked;
-  const mqttRootTopic = ($("mqttRootTopicInput").value || "").trim();
   localStorage.setItem(LS.apiBaseUrl, apiBaseUrl);
-  localStorage.setItem(LS.transport, transport);
   localStorage.setItem(LS.meshHost, meshHost);
   localStorage.setItem(LS.meshPort, meshPort);
-  localStorage.setItem(LS.mqttHost, mqttHost);
-  localStorage.setItem(LS.mqttPort, mqttPort);
-  localStorage.setItem(LS.mqttUsername, mqttUsername);
-  if (mqttPassword) {
-    localStorage.setItem(LS.mqttPassword, mqttPassword);
-  }
-  localStorage.setItem(LS.mqttTls, mqttTls ? "1" : "0");
-  localStorage.setItem(LS.mqttRootTopic, mqttRootTopic);
-  if (transport === "tcp" && !meshHost) {
-    showToast("err", "Meshtastic host is required for TCP");
+  if (!meshHost) {
+    showToast("err", "Meshtastic host is required");
     return;
   }
-  if (transport === "mqtt" && !mqttHost) {
-    showToast("err", "MQTT host is required for MQTT");
-    return;
-  }
-  const body = { transport };
+  const body = {};
   if (meshHost) body.meshHost = meshHost;
   if (meshPort) body.meshPort = Number(meshPort || "4403");
-  if (mqttHost) body.mqttHost = mqttHost;
-  if (mqttPort) body.mqttPort = Number(mqttPort || "1883");
-  if (mqttUsername) body.mqttUsername = mqttUsername;
-  if (mqttPassword) body.mqttPassword = mqttPassword; // omit when blank => keep current
-  body.mqttTls = mqttTls;
-  if (mqttRootTopic) body.mqttRootTopic = mqttRootTopic;
   try {
     await apiFetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (transport === "mqtt") {
-      showToast("ok", `Applied MQTT: ${mqttHost}:${mqttPort || "1883"}`);
-    } else {
-      showToast("ok", `Applied TCP: ${meshHost}:${meshPort || "4403"}`);
-    }
+    showToast("ok", `Applied TCP: ${meshHost}:${meshPort || "4403"}`);
     await tickStatus();
     await tickNodes();
   } catch (e) {
@@ -1345,25 +1286,16 @@ async function exportConfig() {
       exportedAt: new Date().toISOString(),
       apiBaseUrl: localStorage.getItem(LS.apiBaseUrl) || "",
       backend: {
-        transport: h.transport,
         configured: h.configured,
         meshHost: h.meshHost,
         meshPort: h.meshPort,
-        mqttHost: h.mqttHost,
-        mqttPort: h.mqttPort,
-        mqttUsername: h.mqttUsername,
-        mqttTls: h.mqttTls,
-        mqttRootTopic: h.mqttRootTopic,
-        mqttPasswordSet: h.mqttPasswordSet,
       },
       device: deviceConfig,
       deviceConfigError,
       secretsIncluded: includeSecrets,
-      note: "mqttPassword is not included in exports; device config may omit PSKs unless included",
+      note: "device config may omit PSKs unless included",
     };
-    const safeTransport = String(h.transport || "tcp").toLowerCase();
-    const suffix = safeTransport === "mqtt" ? "mqtt" : "tcp";
-    downloadJson(exported, `meshtastic-monitor-config.${suffix}.json`);
+    downloadJson(exported, "meshtastic-monitor-config.tcp.json");
     if (deviceConfigError) {
       showToast("err", `Exported, but device config unavailable: ${deviceConfigError}`);
     } else {
@@ -1481,7 +1413,6 @@ function init() {
   $("nodeModalBackdrop").addEventListener("click", closeNodeModal);
   $("btnSaveSettings").addEventListener("click", saveSettings);
   $("btnExportSettings").addEventListener("click", exportConfig);
-  $("transportSelect").addEventListener("change", applyTransportUi);
   $("btnCopyHealthJson").addEventListener("click", copyHealthJson);
   $("btnToggleHealthJson").addEventListener("click", toggleHealthJson);
   $("sendChannel").addEventListener("change", () => {

@@ -134,7 +134,6 @@ def test_health_configured_false_when_mesh_host_empty():
     c = app.test_client()
 
     h = c.get("/api/health").get_json()
-    assert h["transport"] == "tcp"
     assert h["configured"] is False
     assert h["meshHost"] is None
 
@@ -474,47 +473,9 @@ def test_config_ok(client):
     assert res.get_json()["ok"] is True
 
 
-def test_config_mqtt_ok_and_visible_in_health(client):
-    res = client.post(
-        "/api/config",
-        json={
-            "transport": "mqtt",
-            "mqttHost": "broker.example",
-            "mqttPort": 1884,
-            "mqttUsername": "u",
-            "mqttPassword": "p",
-            "mqttTls": True,
-            "mqttRootTopic": "msh/#",
-        },
-    )
-    assert res.status_code == 200
-    assert res.get_json()["ok"] is True
-
-    h = client.get("/api/health").get_json()
-    assert h["transport"] == "mqtt"
-    assert h["mqttHost"] == "broker.example"
-    assert h["mqttPort"] == 1884
-    assert h["mqttUsername"] == "u"
-    assert h["mqttTls"] is True
-    assert h["mqttPasswordSet"] is True
-
-
-def test_config_accepts_mqtt_tls_string(client):
-    res = client.post("/api/config", json={"mqttTls": "1"})
-    assert res.status_code == 200
-    h = client.get("/api/health").get_json()
-    assert h["mqttTls"] is True
-
-
 def test_config_rejects_bad_types_and_values(client):
-    res = client.post("/api/config", json={"transport": 123})
+    res = client.post("/api/config", json={"meshHost": 123})
     assert res.status_code == 400
 
-    res2 = client.post("/api/config", json={"transport": "nope"})
+    res2 = client.post("/api/config", json={"meshPort": "abc"})
     assert res2.status_code == 400
-
-    res3 = client.post("/api/config", json={"mqttTls": 123})
-    assert res3.status_code == 400
-
-    res4 = client.post("/api/config", json={"mqttPort": "abc"})
-    assert res4.status_code == 400

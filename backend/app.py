@@ -23,29 +23,17 @@ def _parse_int(value: Optional[str], default: int) -> int:
         return int(value)
     except Exception:
         return default
-def _get_env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None or raw == "":
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 def _base_status_payload(cfg: Any, configured: bool, mesh_service: Any) -> Dict[str, Any]:
     return {
         "ok": True,
-        "transport": cfg.transport,
         "configured": configured,
         "meshHost": (cfg.mesh_host or None),
         "meshPort": cfg.mesh_port,
-        "mqttHost": cfg.mqtt_host,
-        "mqttPort": cfg.mqtt_port,
-        "mqttUsername": cfg.mqtt_username,
-        "mqttTls": bool(cfg.mqtt_tls),
-        "mqttRootTopic": cfg.mqtt_root_topic,
-        "mqttPasswordSet": bool(cfg.mqtt_password),
         "connected": bool(mesh_service.is_connected()),
         "lastError": mesh_service.last_error(),
     }
 def _is_configured(cfg: Any) -> bool:
-    return bool(cfg.mqtt_host) if cfg.transport == "mqtt" else bool(cfg.mesh_host)
+    return bool(cfg.mesh_host)
 def _split_nodes(
     nodes: Dict[str, Dict[str, Any]],
 ) -> Tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
@@ -75,6 +63,19 @@ def _parse_history_query() -> Tuple[int, Optional[int], str]:
     limit = _parse_int(limit_raw, 500)
     since = _parse_int(since_raw, 0) if since_raw not in {None, ""} else None
     return limit, since, order
+def _default_frontend_path() -> Path:
+    repo_root = Path(__file__).resolve().parent.parent
+    candidate = repo_root / "frontend"
+    if candidate.exists():
+        return candidate
+    try:
+        from importlib import resources
+
+        return Path(resources.files("frontend"))
+    except Exception:
+        return candidate
+
+
 def create_app(
     *,
     mesh_service: Optional[Any] = None,
@@ -85,8 +86,7 @@ def create_app(
         level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    root_dir = Path(__file__).resolve().parent.parent
-    frontend_path = frontend_dir or (root_dir / "frontend")
+    frontend_path = frontend_dir or _default_frontend_path()
     app = Flask(
         __name__,
         static_folder=str(frontend_path),
@@ -94,15 +94,8 @@ def create_app(
     )
     # Service init
     if mesh_service is None:
-        mesh_transport = os.getenv("MESH_TRANSPORT", "tcp")
         mesh_host = os.getenv("MESH_HOST", "").strip()
         mesh_port = _get_env_int("MESH_PORT", 4403)
-        mqtt_host = os.getenv("MQTT_HOST", "mqtt.meshtastic.org")
-        mqtt_port = _get_env_int("MQTT_PORT", 1883)
-        mqtt_username = os.getenv("MQTT_USERNAME") or None
-        mqtt_password = os.getenv("MQTT_PASSWORD") or None
-        mqtt_tls = _get_env_bool("MQTT_TLS", False)
-        mqtt_root_topic = os.getenv("MQTT_ROOT_TOPIC") or None
         nodes_refresh_sec = _get_env_int("NODES_REFRESH_SEC", 5)
         max_messages = _get_env_int("MAX_MESSAGES", 200)
         if stats_db is None:
@@ -118,13 +111,6 @@ def create_app(
         mesh_service = MeshService(
             mesh_host,
             mesh_port,
-            transport=mesh_transport,
-            mqtt_host=mqtt_host,
-            mqtt_port=mqtt_port,
-            mqtt_username=mqtt_username,
-            mqtt_password=mqtt_password,
-            mqtt_tls=mqtt_tls,
-            mqtt_root_topic=mqtt_root_topic,
             nodes_refresh_sec=nodes_refresh_sec,
             max_messages=max_messages,
             stats_db=stats_db,
@@ -408,12 +394,9 @@ def create_app(
                 "ok": True,
                 "dbPath": summary.db_path,
                 "generatedAt": summary.generated_at,
-                "transport": cfg.transport,
                 "configured": configured,
                 "meshHost": (cfg.mesh_host or None),
                 "meshPort": cfg.mesh_port,
-                "mqttHost": cfg.mqtt_host,
-                "mqttPort": cfg.mqtt_port,
                 "connected": bool(mesh_service.is_connected()),
                 "lastError": mesh_service.last_error(),
                 "counters": summary.counters,
@@ -472,20 +455,9 @@ def create_app(
         Optional runtime reconfiguration. Useful for local UI settings without editing env vars.
         """
         body = request.get_json(silent=True) or {}
-        transport = body.get("transport")
         mesh_host = body.get("meshHost")
         mesh_port = body.get("meshPort")
-        mqtt_host = body.get("mqttHost")
-        mqtt_port = body.get("mqttPort")
-        mqtt_username = body.get("mqttUsername")
-        mqtt_password = body.get("mqttPassword")
-        mqtt_tls = body.get("mqttTls")
-        mqtt_root_topic = body.get("mqttRootTopic")
         kwargs: Dict[str, Any] = {}
-        if transport is not None:
-            if not isinstance(transport, str):
-                return jsonify({"ok": False, "error": "transport must be a string"}), 400
-            kwargs["transport"] = transport
         if mesh_host is not None:
             if not isinstance(mesh_host, str) or not mesh_host.strip():
                 return jsonify({"ok": False, "error": "meshHost must be a non-empty string"}), 400
@@ -495,34 +467,6 @@ def create_app(
                 kwargs["mesh_port"] = int(mesh_port)
             except Exception:
                 return jsonify({"ok": False, "error": "meshPort must be an int"}), 400
-        if mqtt_host is not None:
-            if not isinstance(mqtt_host, str) or not mqtt_host.strip():
-                return jsonify({"ok": False, "error": "mqttHost must be a non-empty string"}), 400
-            kwargs["mqtt_host"] = mqtt_host.strip()
-        if mqtt_port is not None:
-            try:
-                kwargs["mqtt_port"] = int(mqtt_port)
-            except Exception:
-                return jsonify({"ok": False, "error": "mqttPort must be an int"}), 400
-        if mqtt_username is not None:
-            if not isinstance(mqtt_username, str):
-                return jsonify({"ok": False, "error": "mqttUsername must be a string"}), 400
-            kwargs["mqtt_username"] = mqtt_username
-        if mqtt_password is not None:
-            if not isinstance(mqtt_password, str):
-                return jsonify({"ok": False, "error": "mqttPassword must be a string"}), 400
-            kwargs["mqtt_password"] = mqtt_password
-        if mqtt_tls is not None:
-            if isinstance(mqtt_tls, bool):
-                kwargs["mqtt_tls"] = mqtt_tls
-            elif isinstance(mqtt_tls, str):
-                kwargs["mqtt_tls"] = mqtt_tls.strip().lower() in {"1", "true", "yes", "y", "on"}
-            else:
-                return jsonify({"ok": False, "error": "mqttTls must be a boolean"}), 400
-        if mqtt_root_topic is not None:
-            if not isinstance(mqtt_root_topic, str):
-                return jsonify({"ok": False, "error": "mqttRootTopic must be a string"}), 400
-            kwargs["mqtt_root_topic"] = mqtt_root_topic
         if not kwargs:
             return jsonify({"ok": False, "error": "no config fields provided"}), 400
         try:

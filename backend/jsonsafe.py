@@ -123,7 +123,6 @@ def radio_entry(node: Dict[str, Any]) -> Dict[str, Any]:
         "isKeyManuallyVerified": _bool_or_none(
             node.get("isKeyManuallyVerified") or node.get("is_key_manually_verified")
         ),
-        "viaMqtt": _bool_or_none(node.get("viaMqtt") or node.get("via_mqtt")),
         "channel": _int_or_none(node.get("channel")),
         "batteryLevel": _float_or_none(device.get("batteryLevel") or device.get("battery_level")),
         "voltage": _float_or_none(device.get("voltage")),
