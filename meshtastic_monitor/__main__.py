@@ -128,6 +128,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--sms-api-url", dest="sms_api_url", help="SMS API base URL")
     parser.add_argument("--sms-api-key", dest="sms_api_key", help="SMS API key")
     parser.add_argument("--sms-phone", dest="sms_phone", help="SMS destination phone")
+    parser.add_argument(
+        "--sms-allow-from",
+        dest="sms_allow_from",
+        help="Allowed sender IDs for SMS relay (comma-separated or ALL)",
+    )
+    parser.add_argument(
+        "--sms-allow-types",
+        dest="sms_allow_types",
+        help="Allowed message types for SMS relay (comma-separated or ALL)",
+    )
     parser.add_argument("--sms-enabled", dest="sms_enabled", action="store_true", help="Enable SMS relay")
     parser.add_argument("--sms-disabled", dest="sms_enabled", action="store_false", help="Disable SMS relay")
     parser.set_defaults(sms_enabled=None)
@@ -146,6 +156,8 @@ def main(argv: list[str] | None = None) -> None:
     sms_api_url_cfg = get_value(cfg, "sms", "api_url", DEFAULT_SMS_API_URL)
     sms_api_key_cfg = get_value(cfg, "sms", "api_key", "")
     sms_phone_cfg = get_value(cfg, "sms", "phone", "")
+    sms_allow_from_cfg = get_value(cfg, "sms", "allow_from_ids", "ALL")
+    sms_allow_types_cfg = get_value(cfg, "sms", "allow_types", "ALL")
 
     mesh_host = _coalesce_str(args.mesh_host, os.getenv("MESH_HOST"), mesh_host_cfg)
     mesh_host = _prompt(mesh_host, "Meshtastic host/IP: ")
@@ -162,6 +174,12 @@ def main(argv: list[str] | None = None) -> None:
     sms_api_url = _coalesce_str(args.sms_api_url, os.getenv("SMS_API_URL"), sms_api_url_cfg)
     sms_api_key = _coalesce_str(args.sms_api_key, os.getenv("SMS_API_KEY"), sms_api_key_cfg)
     sms_phone = _coalesce_str(args.sms_phone, os.getenv("SMS_PHONE"), sms_phone_cfg)
+    sms_allow_from_ids = _coalesce_str(
+        args.sms_allow_from, os.getenv("SMS_ALLOW_FROM_IDS"), sms_allow_from_cfg
+    )
+    sms_allow_types = _coalesce_str(
+        args.sms_allow_types, os.getenv("SMS_ALLOW_TYPES"), sms_allow_types_cfg
+    )
 
     os.environ["MESH_HOST"] = mesh_host
     os.environ["MESH_PORT"] = str(mesh_port)
@@ -172,6 +190,8 @@ def main(argv: list[str] | None = None) -> None:
     os.environ["SMS_API_URL"] = str(sms_api_url or "")
     os.environ["SMS_API_KEY"] = str(sms_api_key or "")
     os.environ["SMS_PHONE"] = str(sms_phone or "")
+    os.environ["SMS_ALLOW_FROM_IDS"] = str(sms_allow_from_ids or "")
+    os.environ["SMS_ALLOW_TYPES"] = str(sms_allow_types or "")
     if args.log_level:
         os.environ["LOG_LEVEL"] = str(args.log_level)
 
@@ -186,6 +206,8 @@ def main(argv: list[str] | None = None) -> None:
                 "api_url": sms_api_url,
                 "api_key": sms_api_key,
                 "phone": sms_phone,
+                "allow_from_ids": sms_allow_from_ids,
+                "allow_types": sms_allow_types,
             },
         },
     )

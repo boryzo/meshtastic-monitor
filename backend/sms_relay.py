@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import urllib.error
@@ -21,6 +22,8 @@ class SmsRelay:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         phone: Optional[str] = None,
+        allow_from_ids: Optional[str] = None,
+        allow_types: Optional[str] = None,
         timeout_sec: float = 4.0,
     ) -> None:
         self._lock = threading.Lock()
@@ -28,6 +31,10 @@ class SmsRelay:
         self._api_url = (api_url or "").strip()
         self._api_key = (api_key or "").strip()
         self._phone = (phone or "").strip()
+        self._allow_from_ids_raw = (allow_from_ids or "").strip()
+        self._allow_types_raw = (allow_types or "").strip()
+        self._allow_from_ids = _parse_allow_from_ids(self._allow_from_ids_raw)
+        self._allow_types = _parse_allow_types(self._allow_types_raw)
         self._timeout_sec = max(1.0, float(timeout_sec))
 
     def get_config(self) -> Dict[str, Any]:
@@ -37,6 +44,8 @@ class SmsRelay:
                 "apiUrl": self._api_url or None,
                 "phone": self._phone or None,
                 "apiKeySet": bool(self._api_key),
+                "allowFromIds": self._allow_from_ids_raw or "ALL",
+                "allowTypes": self._allow_types_raw or "ALL",
             }
 
     def update_config(
@@ -46,6 +55,8 @@ class SmsRelay:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         phone: Optional[str] = None,
+        allow_from_ids: Optional[str] = None,
+        allow_types: Optional[str] = None,
         timeout_sec: Optional[float] = None,
     ) -> None:
         with self._lock:
@@ -57,10 +68,18 @@ class SmsRelay:
                 self._api_key = str(api_key or "").strip()
             if phone is not None:
                 self._phone = str(phone or "").strip()
+            if allow_from_ids is not None:
+                self._allow_from_ids_raw = str(allow_from_ids or "").strip()
+                self._allow_from_ids = _parse_allow_from_ids(self._allow_from_ids_raw)
+            if allow_types is not None:
+                self._allow_types_raw = str(allow_types or "").strip()
+                self._allow_types = _parse_allow_types(self._allow_types_raw)
             if timeout_sec is not None:
                 self._timeout_sec = max(1.0, float(timeout_sec))
 
     def send_message(self, msg: Dict[str, Any]) -> None:
+        if not self._is_allowed(msg):
+            return
         message = self._format_message(msg)
         self._send_async(message)
 
@@ -84,6 +103,25 @@ class SmsRelay:
                 and bool(self._api_key)
                 and bool(self._phone)
             )
+
+    def _is_allowed(self, msg: Dict[str, Any]) -> bool:
+        with self._lock:
+            allow_from = self._allow_from_ids
+            allow_types = self._allow_types
+        from_id_raw = msg.get("fromId") or ""
+        from_id = str(from_id_raw).strip().lower()
+        if allow_from and from_id not in allow_from:
+            logger.info("SMS relay skipped (reason=from_id, from=%s)", from_id_raw or "—")
+            return False
+        msg_types = _message_types(msg)
+        if allow_types and msg_types.isdisjoint(allow_types):
+            logger.info(
+                "SMS relay skipped (reason=type, from=%s, types=%s)",
+                from_id_raw or "—",
+                ",".join(sorted(msg_types)),
+            )
+            return False
+        return True
 
     def _send_async(self, message: str) -> None:
         if not self._ready():
@@ -150,6 +188,7 @@ def _snippet(payload: Any, api_key: str, max_len: int = 200) -> str:
     if not text:
         return ""
     text = _redact_api_key(text, api_key)
+    text = _redact_urls(text)
     if len(text) > max_len:
         return text[:max_len] + "…"
     return text
@@ -168,3 +207,63 @@ def _redact_api_key(text: str, api_key: str) -> str:
     except Exception:
         pass
     return text
+
+
+_URL_RE = re.compile(r"https?://\\S+", re.IGNORECASE)
+
+
+def _redact_urls(text: str) -> str:
+    return _URL_RE.sub("***", text)
+
+
+def _split_list(value: str) -> list[str]:
+    return [v for v in re.split(r"[\\s,;]+", value) if v]
+
+
+def _parse_allow_from_ids(raw: str) -> Optional[set[str]]:
+    if not raw:
+        return None
+    items = [v.strip() for v in _split_list(raw) if v.strip()]
+    if not items:
+        return None
+    if any(v.upper() == "ALL" for v in items):
+        return None
+    return {v.lower() for v in items}
+
+
+def _parse_allow_types(raw: str) -> Optional[set[str]]:
+    if not raw:
+        return None
+    items = [v.strip() for v in _split_list(raw) if v.strip()]
+    if not items:
+        return None
+    if any(v.upper() == "ALL" for v in items):
+        return None
+    out: set[str] = set()
+    for item in items:
+        up = item.upper()
+        if up.isdigit():
+            out.add(f"PORTNUM:{int(up)}")
+        else:
+            out.add(up)
+    return out
+
+
+def _message_types(msg: Dict[str, Any]) -> set[str]:
+    types: set[str] = set()
+    text = msg.get("text")
+    if isinstance(text, str) and text.strip():
+        types.add("TEXT")
+    app = msg.get("app")
+    if isinstance(app, str) and app.strip():
+        types.add(app.strip().upper())
+    port = msg.get("portnum")
+    if port is not None:
+        try:
+            pn = int(port)
+            types.add(f"PORTNUM:{pn}")
+        except Exception:
+            pass
+    if not types:
+        types.add("UNKNOWN")
+    return types

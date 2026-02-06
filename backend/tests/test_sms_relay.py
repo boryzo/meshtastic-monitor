@@ -146,3 +146,49 @@ def test_sms_relay_disabled_does_not_call_gateway(monkeypatch):
     relay.send_message({"fromId": "!a", "toId": "!b", "text": "hello"})
 
     assert called["ok"] is False
+
+
+def test_sms_relay_filters_by_from_id(monkeypatch):
+    called = {"ok": False}
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        called["ok"] = True
+        return _DummyResponse()
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+
+    relay = sms_relay.SmsRelay(
+        enabled=True,
+        api_url="https://sms.example/send",
+        api_key="k",
+        phone="p",
+        allow_from_ids="!allow",
+    )
+    relay.send_message({"fromId": "!deny", "toId": "!b", "text": "hello"})
+    assert called["ok"] is False
+
+
+def test_sms_relay_filters_by_type(monkeypatch):
+    called = {"ok": False}
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        called["ok"] = True
+        return _DummyResponse()
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+
+    relay = sms_relay.SmsRelay(
+        enabled=True,
+        api_url="https://sms.example/send",
+        api_key="k",
+        phone="p",
+        allow_types="TEXT",
+    )
+    relay.send_message({"fromId": "!a", "toId": "!b", "portnum": 5, "text": ""})
+    assert called["ok"] is False
+
+    relay.update_config(allow_types="5")
+    relay.send_message({"fromId": "!a", "toId": "!b", "portnum": 5, "text": ""})
+    assert called["ok"] is True

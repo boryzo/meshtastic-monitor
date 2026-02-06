@@ -65,6 +65,8 @@ class MeshService:
         sms_api_url: Optional[str] = None,
         sms_api_key: Optional[str] = None,
         sms_phone: Optional[str] = None,
+        sms_allow_from_ids: Optional[str] = None,
+        sms_allow_types: Optional[str] = None,
         sms_timeout_sec: float = 4.0,
     ) -> None:
         mesh_host = str(mesh_host or "").strip()
@@ -87,6 +89,8 @@ class MeshService:
             api_url=sms_api_url,
             api_key=sms_api_key,
             phone=sms_phone,
+            allow_from_ids=sms_allow_from_ids,
+            allow_types=sms_allow_types,
             timeout_sec=sms_timeout_sec,
         )
 
@@ -277,12 +281,16 @@ class MeshService:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         phone: Optional[str] = None,
+        allow_from_ids: Optional[str] = None,
+        allow_types: Optional[str] = None,
     ) -> None:
         self._sms.update_config(
             enabled=enabled,
             api_url=api_url,
             api_key=api_key,
             phone=phone,
+            allow_from_ids=allow_from_ids,
+            allow_types=allow_types,
         )
 
     def get_status_snapshot(self, *, force: bool = False) -> Dict[str, Any]:
@@ -678,6 +686,8 @@ class FakeMeshService:
         self._sms_api_url = ""
         self._sms_api_key = ""
         self._sms_phone = ""
+        self._sms_allow_from_ids = ""
+        self._sms_allow_types = ""
 
     def start(self) -> None:  # noqa: D401
         self._connected = True
@@ -722,6 +732,8 @@ class FakeMeshService:
             "apiUrl": self._sms_api_url or None,
             "phone": self._sms_phone or None,
             "apiKeySet": bool(self._sms_api_key),
+            "allowFromIds": self._sms_allow_from_ids or "ALL",
+            "allowTypes": self._sms_allow_types or "ALL",
         }
 
     def update_sms_config(
@@ -731,6 +743,8 @@ class FakeMeshService:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         phone: Optional[str] = None,
+        allow_from_ids: Optional[str] = None,
+        allow_types: Optional[str] = None,
     ) -> None:
         if enabled is not None:
             self._sms_enabled = bool(enabled)
@@ -740,6 +754,10 @@ class FakeMeshService:
             self._sms_api_key = str(api_key or "").strip()
         if phone is not None:
             self._sms_phone = str(phone or "").strip()
+        if allow_from_ids is not None:
+            self._sms_allow_from_ids = str(allow_from_ids or "").strip()
+        if allow_types is not None:
+            self._sms_allow_types = str(allow_types or "").strip()
 
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         return dict(self._radio) if isinstance(self._radio, dict) else None

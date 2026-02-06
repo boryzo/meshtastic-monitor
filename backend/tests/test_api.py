@@ -480,6 +480,8 @@ def test_config_get_includes_sms_defaults(client):
     assert body["ok"] is True
     assert body["sms"]["enabled"] is False
     assert body["sms"]["apiKeySet"] is False
+    assert body["sms"]["allowFromIds"] == "ALL"
+    assert body["sms"]["allowTypes"] == "ALL"
 
 
 def test_config_updates_sms_settings():
@@ -496,6 +498,8 @@ def test_config_updates_sms_settings():
             "smsApiUrl": "https://example.invalid/sms",
             "smsApiKey": "secret",
             "smsPhone": "600000000",
+            "smsAllowFromIds": "!abcd1234",
+            "smsAllowTypes": "TEXT,3",
         },
     )
     assert res.status_code == 200
@@ -504,6 +508,8 @@ def test_config_updates_sms_settings():
     assert sms["apiUrl"] == "https://example.invalid/sms"
     assert sms["phone"] == "600000000"
     assert sms["apiKeySet"] is True
+    assert sms["allowFromIds"] == "!abcd1234"
+    assert sms["allowTypes"] == "TEXT,3"
 
 
 def test_config_rejects_bad_sms_types(client):

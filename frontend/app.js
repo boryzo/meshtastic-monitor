@@ -6,6 +6,8 @@ const LS = {
   smsEnabled: "meshmon.smsEnabled",
   smsApiUrl: "meshmon.smsApiUrl",
   smsPhone: "meshmon.smsPhone",
+  smsAllowFromIds: "meshmon.smsAllowFromIds",
+  smsAllowTypes: "meshmon.smsAllowTypes",
   sendChannel: "meshmon.sendChannel",
   messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
@@ -61,6 +63,9 @@ let activeMainTab = "status";
 let activeMessageChannel = "all";
 let nodesHistory = [];
 let activeNodeId = null;
+const STATUS_REPORT_GRACE_SEC = 60;
+let statusFirstSeenAt = null;
+let lastReportOkAt = null;
 const nodesSort = {
   direct: { key: "age", dir: "asc" }, // fresh first
   relayed: { key: "age", dir: "asc" }, // fresh first
@@ -340,6 +345,8 @@ async function tickStatus() {
   }
 }
 function renderStatus(h) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (statusFirstSeenAt === null) statusFirstSeenAt = nowSec;
   const statusText =
     h.configured === false ? "Not configured" : h.connected ? "Connected" : "Disconnected";
   const overview = [];
@@ -350,15 +357,23 @@ function renderStatus(h) {
   if (h.lastError) overview.push(kv("Last error", String(h.lastError), true));
   $("statusOverview").innerHTML = overview.join("");
 
+  if (h.reportOk && h.report) {
+    lastReportOkAt = nowSec;
+  }
+  const graceStart = lastReportOkAt ?? statusFirstSeenAt ?? nowSec;
+  const inGrace = nowSec - graceStart < STATUS_REPORT_GRACE_SEC;
+
   const updated = h.reportFetchedAt
     ? new Date(h.reportFetchedAt * 1000).toLocaleTimeString()
     : "—";
   $("statusMeta").textContent = `updated ${updated}`;
   $("statusError").textContent = h.reportOk
     ? ""
-    : h.reportError
-      ? `Report error: ${h.reportError}`
-      : "Report unavailable";
+    : inGrace
+      ? "Waiting for report…"
+      : h.reportError
+        ? `Report error: ${h.reportError}`
+        : "Report unavailable";
 
   if (!h.report) {
     ["statusPower", "statusMemory", "statusAirtime", "statusRadio", "statusWifi"].forEach(
@@ -1260,6 +1275,8 @@ async function openModal() {
   $("smsEnabled").checked = (localStorage.getItem(LS.smsEnabled) || "").trim() === "1";
   $("smsApiUrl").value = localStorage.getItem(LS.smsApiUrl) || "";
   $("smsPhone").value = localStorage.getItem(LS.smsPhone) || "";
+  $("smsAllowFromIds").value = localStorage.getItem(LS.smsAllowFromIds) || "";
+  $("smsAllowTypes").value = localStorage.getItem(LS.smsAllowTypes) || "";
   $("smsApiKey").value = "";
   setSmsKeyHint(false);
   try {
@@ -1284,6 +1301,10 @@ async function openModal() {
       $("smsPhone").value = sms.phone || "";
       localStorage.setItem(LS.smsApiUrl, sms.apiUrl || "");
       localStorage.setItem(LS.smsPhone, sms.phone || "");
+      $("smsAllowFromIds").value = sms.allowFromIds || "ALL";
+      $("smsAllowTypes").value = sms.allowTypes || "ALL";
+      localStorage.setItem(LS.smsAllowFromIds, sms.allowFromIds || "ALL");
+      localStorage.setItem(LS.smsAllowTypes, sms.allowTypes || "ALL");
       setSmsKeyHint(Boolean(sms.apiKeySet));
     }
   } catch {
@@ -1303,12 +1324,16 @@ async function saveSettings() {
   const smsApiUrl = ($("smsApiUrl").value || "").trim();
   const smsApiKey = ($("smsApiKey").value || "").trim();
   const smsPhone = ($("smsPhone").value || "").trim();
+  const smsAllowFromIds = ($("smsAllowFromIds").value || "").trim();
+  const smsAllowTypes = ($("smsAllowTypes").value || "").trim();
   localStorage.setItem(LS.apiBaseUrl, apiBaseUrl);
   localStorage.setItem(LS.meshHost, meshHost);
   localStorage.setItem(LS.meshPort, meshPort);
   localStorage.setItem(LS.smsEnabled, smsEnabled ? "1" : "0");
   localStorage.setItem(LS.smsApiUrl, smsApiUrl);
   localStorage.setItem(LS.smsPhone, smsPhone);
+  localStorage.setItem(LS.smsAllowFromIds, smsAllowFromIds);
+  localStorage.setItem(LS.smsAllowTypes, smsAllowTypes);
   if (!meshHost) {
     showToast("err", "Meshtastic host is required");
     return;
@@ -1319,6 +1344,8 @@ async function saveSettings() {
   body.smsEnabled = smsEnabled;
   body.smsApiUrl = smsApiUrl;
   body.smsPhone = smsPhone;
+  body.smsAllowFromIds = smsAllowFromIds;
+  body.smsAllowTypes = smsAllowTypes;
   if (smsApiKey) body.smsApiKey = smsApiKey;
   try {
     await apiFetch("/api/config", {

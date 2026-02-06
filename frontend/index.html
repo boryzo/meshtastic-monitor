@@ -287,6 +287,19 @@
             <div class="hint" id="smsKeyHint">Leave blank to keep existing key.</div>
           </div>
         </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="smsAllowFromIds">SMS Allowed From IDs</label>
+            <input id="smsAllowFromIds" class="input" placeholder="ALL or !abcd1234,!beef5678" />
+            <div class="hint">Comma-separated sender IDs or <code>ALL</code>.</div>
+          </div>
+          <div class="field">
+            <label for="smsAllowTypes">SMS Allowed Types</label>
+            <input id="smsAllowTypes" class="input" placeholder="ALL or TEXT,POSITION_APP,5" />
+            <div class="hint">Comma-separated types (TEXT, app names, or port numbers) or <code>ALL</code>.</div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <div class="row">

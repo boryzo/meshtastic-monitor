@@ -153,6 +153,8 @@ def create_app(
             sms_api_url=os.getenv("SMS_API_URL", "").strip(),
             sms_api_key=os.getenv("SMS_API_KEY", "").strip(),
             sms_phone=os.getenv("SMS_PHONE", "").strip(),
+            sms_allow_from_ids=os.getenv("SMS_ALLOW_FROM_IDS", "").strip(),
+            sms_allow_types=os.getenv("SMS_ALLOW_TYPES", "").strip(),
             sms_timeout_sec=_get_env_float("SMS_TIMEOUT_SEC", 4.0),
         )
         mesh_service.start()
@@ -542,6 +544,8 @@ def create_app(
         sms_api_url = body.get("smsApiUrl")
         sms_api_key = body.get("smsApiKey")
         sms_phone = body.get("smsPhone")
+        sms_allow_from_ids = body.get("smsAllowFromIds")
+        sms_allow_types = body.get("smsAllowTypes")
         kwargs: Dict[str, Any] = {}
         sms_kwargs: Dict[str, Any] = {}
         if mesh_host is not None:
@@ -570,6 +574,14 @@ def create_app(
             if not isinstance(sms_phone, str):
                 return jsonify({"ok": False, "error": "smsPhone must be a string"}), 400
             sms_kwargs["phone"] = sms_phone.strip()
+        if sms_allow_from_ids is not None:
+            if not isinstance(sms_allow_from_ids, str):
+                return jsonify({"ok": False, "error": "smsAllowFromIds must be a string"}), 400
+            sms_kwargs["allow_from_ids"] = sms_allow_from_ids.strip()
+        if sms_allow_types is not None:
+            if not isinstance(sms_allow_types, str):
+                return jsonify({"ok": False, "error": "smsAllowTypes must be a string"}), 400
+            sms_kwargs["allow_types"] = sms_allow_types.strip()
         if not kwargs and not sms_kwargs:
             return jsonify({"ok": False, "error": "no config fields provided"}), 400
         try:
@@ -595,6 +607,10 @@ def create_app(
                         sms_updates["api_key"] = sms_kwargs["api_key"]
                     if "phone" in sms_kwargs:
                         sms_updates["phone"] = sms_kwargs["phone"]
+                    if "allow_from_ids" in sms_kwargs:
+                        sms_updates["allow_from_ids"] = sms_kwargs["allow_from_ids"]
+                    if "allow_types" in sms_kwargs:
+                        sms_updates["allow_types"] = sms_kwargs["allow_types"]
                     updates["sms"] = sms_updates
                 if updates:
                     update_config(resolve_config_path(config_path_raw), updates)

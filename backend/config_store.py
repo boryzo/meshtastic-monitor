@@ -32,6 +32,8 @@ def default_config() -> Dict[str, Dict[str, str]]:
             "api_url": DEFAULT_SMS_API_URL,
             "api_key": "",
             "phone": "",
+            "allow_from_ids": "ALL",
+            "allow_types": "ALL",
         },
         "stats": {
             "nodes_history_interval_sec": "60",

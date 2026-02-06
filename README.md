@@ -76,7 +76,11 @@ If you want **every incoming packet** forwarded via SMS, configure it in Setting
 - Enable **SMS relay**
 - Set **SMS API URL**, **API key**, and **Phone**
 
-Example API format: configured by your provider.
+You can also apply allow-list filters:
+
+- **Allowed From IDs** (comma-separated or `ALL`)
+- **Allowed Types** (comma-separated or `ALL`)
+  - Types can be `TEXT`, app names (e.g. `POSITION_APP`), or port numbers (e.g. `5`)
 
 ## Command-line options (copy/paste)
 
@@ -99,6 +103,8 @@ Most used:
 - `--sms-api-url`
 - `--sms-api-key`
 - `--sms-phone`
+- `--sms-allow-from` (comma-separated sender IDs or `ALL`)
+- `--sms-allow-types` (comma-separated types or `ALL`)
 
 You can also set env vars instead of flags:
 
@@ -120,6 +126,8 @@ You can also set env vars instead of flags:
 - `SMS_API_URL` (base URL, e.g. `https://your-sms-gateway.example/api`)
 - `SMS_API_KEY`
 - `SMS_PHONE`
+- `SMS_ALLOW_FROM_IDS` (comma-separated sender IDs or `ALL`)
+- `SMS_ALLOW_TYPES` (comma-separated types or `ALL`)
 - `SMS_TIMEOUT_SEC` (seconds, default `4`)
 
 ## Logs (where are they?)
