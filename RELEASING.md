@@ -22,7 +22,7 @@ Choose **one** method:
 
 ## Release steps
 
-1. Update version in `pyproject.toml`.
+1. Update version in `setup.cfg`.
 2. Commit the version bump.
 3. Tag and push:
 
