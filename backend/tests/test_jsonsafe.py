@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import backend.jsonsafe as jsonsafe
 from backend.jsonsafe import clamp_str, json_safe_packet, node_entry, quality_bucket, radio_entry
+
+LIVE_FIXTURES = Path(__file__).parent / "fixtures" / "live"
+
+
+def _load_live_nodes():
+    return json.loads((LIVE_FIXTURES / "nodes.json").read_text())
 
 
 def test_quality_bucket_ranges():
@@ -20,9 +30,9 @@ def test_json_safe_packet_encodes_bytes_payload():
         "rxTime": 1,
         "fromId": "!a",
         "toId": "!b",
-        "snr": -1,
-        "rssi": -100,
-        "decoded": {"portnum": 3, "text": "hi", "payload": b"\x01\x02"},
+        "rxSnr": -1,
+        "rxRssi": -100,
+        "decoded": {"portnum": "POSITION_APP", "text": "hi", "payload": b"\x01\x02"},
     }
     out = json_safe_packet(pkt)
     assert out["text"] == "hi"
@@ -39,7 +49,13 @@ def test_json_safe_packet_maps_rx_snr_and_rx_rssi():
         "rxSnr": -5,
         "rxRssi": -110,
         "hopLimit": 3,
-        "decoded": {"portnum": 3, "text": "hi", "payload": b"", "requestId": 7, "wantResponse": True},
+        "decoded": {
+            "portnum": "POSITION_APP",
+            "text": "hi",
+            "payload": b"",
+            "requestId": 7,
+            "wantResponse": True,
+        },
     }
     out = json_safe_packet(pkt)
     assert out["snr"] == -5
@@ -54,9 +70,9 @@ def test_json_safe_packet_maps_routing_app():
         "rxTime": 2,
         "fromId": "!a",
         "toId": "!b",
-        "snr": -1,
-        "rssi": -90,
-        "decoded": {"portnum": 5, "text": "", "payload": b""},
+        "rxSnr": -1,
+        "rxRssi": -90,
+        "decoded": {"portnum": "ROUTING_APP", "text": "", "payload": b""},
     }
     out = json_safe_packet(pkt)
     assert out["app"] == "ROUTING_APP"
@@ -69,85 +85,41 @@ def test_json_safe_packet_encodes_bytes_in_other_fields():
     assert out["payload_b64"] == "Ag=="
 
 
-def test_json_safe_packet_reads_channel_index_aliases():
-    pkt = {"rxTime": 1, "channelIndex": 0, "decoded": {"portnum": 1}}
+def test_json_safe_packet_reads_channel():
+    pkt = {"rxTime": 1, "channel": 0, "decoded": {"portnum": "POSITION_APP"}}
     out = json_safe_packet(pkt)
     assert out["channel"] == 0
 
-    pkt2 = {"rxTime": 1, "decoded": {"channelIndex": 2, "portnum": 1}}
-    out2 = json_safe_packet(pkt2)
-    assert out2["channel"] == 2
 
-
-def test_node_entry_shapes_quality_and_strings():
-    node = {
-        "user": {"shortName": "SN", "longName": "Long Name", "role": "CLIENT", "hwModel": "TBEAM"},
-        "firmwareVersion": "2.4.0",
-        "snr": -3,
-        "hopsAway": "2",
-        "lastHeard": 100,
-    }
-    out = node_entry("!abcd", node)
-    assert out["id"] == "!abcd"
-    assert out["quality"] == "ok"
-    assert out["hopsAway"] == 2
-    assert out["short"] == "SN"
-    assert out["long"] == "Long Name"
-    assert out["role"] == "CLIENT"
-    assert out["hwModel"] == "TBEAM"
-    assert out["firmware"] == "2.4.0"
-
-
-def test_node_entry_supports_snake_case_keys():
-    node = {
-        "user": {"short_name": "SN", "long_name": "Long Name", "role": "ROUTER", "hw_model": "HELTEC_V3"},
-        "snr": -3,
-        "hops_away": 3,
-        "last_heard": 100,
-    }
-    out = node_entry("!abcd", node)
-    assert out["short"] == "SN"
-    assert out["long"] == "Long Name"
-    assert out["hopsAway"] == 3
-    assert out["lastHeard"] == 100
+def test_node_entry_live_node(monkeypatch):
+    nodes = _load_live_nodes()
+    node_id = "!04c54144"
+    node = nodes[node_id]
+    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: 1770402510)
+    out = node_entry(node_id, node)
+    assert out["id"] == node_id
+    assert out["short"] == "_RE_"
+    assert out["long"] == "REST 2"
     assert out["role"] == "ROUTER"
-    assert out["hwModel"] == "HELTEC_V3"
+    assert out["hwModel"] == "HELTEC_V4"
+    assert out["snr"] == 1.25
+    assert out["hopsAway"] == 1
+    assert out["lastHeard"] == 1770402450
+    assert out["ageSec"] == 60
+    assert out["quality"] == "good"
+    assert out["firmware"] is None
 
 
-def test_node_entry_reads_firmware_from_user_and_ignores_version_dict():
-    node = {
-        "user": {
-            "shortName": "SN",
-            "longName": "Long Name",
-            "role": "CLIENT",
-            "hwModel": "TBEAM",
-            "firmwareVersion": "2.7.1",
-        },
-        "snr": 1.0,
-        "lastHeard": 100,
-    }
-    out = node_entry("!abcd", node)
-    assert out["firmware"] == "2.7.1"
-
-    node2 = {
-        "user": {"shortName": "SN", "longName": "Long Name"},
-        "firmwareVersion": {"major": 2, "minor": 6, "patch": 0},
-        "snr": 1.0,
-        "lastHeard": 100,
-    }
-    out2 = node_entry("!abcd", node2)
-    assert out2["firmware"] is None
-
-
-def test_node_entry_leaves_hops_empty_when_missing():
-    node = {
-        "user": {"shortName": "SN", "longName": "Long Name"},
-        "snr": 1.0,
-        "lastHeard": 100,
-    }
-    out = node_entry("!abcd", node)
-    assert out["hopsAway"] is None
+def test_node_entry_defaults_role_to_client(monkeypatch):
+    nodes = _load_live_nodes()
+    node_id = "!04c573f4"
+    node = nodes[node_id]
+    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: 1770402570)
+    out = node_entry(node_id, node)
     assert out["role"] == "CLIENT"
+    assert out["snr"] == -2.75
+    assert out["quality"] == "ok"
+    assert out["ageSec"] == 3
 
 
 def test_clamp_str_limits_length_and_handles_bad_str():
@@ -160,16 +132,24 @@ def test_clamp_str_limits_length_and_handles_bad_str():
     assert clamp_str(BadStr()) is None
 
 
-def test_radio_entry_converts_position_integer_lat_lon():
-    node = {
-        "user": {"id": "!me", "shortName": "ME", "longName": "Me"},
-        "snr": 1,
-        "lastHeard": 100,
-        "position": {"latitudeI": 123456789, "longitudeI": -123456789, "altitude": 120},
-    }
+def test_radio_entry_live_position_and_metrics(monkeypatch):
+    nodes = _load_live_nodes()
+    node_id = "!06da6f70"
+    node = nodes[node_id]
+    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: 1770400910)
     out = radio_entry(node)
+    assert out["id"] == node_id
+    assert out["short"] == "Wojt"
+    assert out["long"] == "Wojt ☀ ML3843"
+    assert out["role"] == "CLIENT_BASE"
+    assert out["hopsAway"] == 2
+    assert out["batteryLevel"] == 48.0
+    assert out["voltage"] == 3.71
+    assert out["channelUtilization"] == 17.591667
+    assert out["airUtilTx"] == 0.61169446
     pos = out["position"]
-    assert pos is not None
-    assert round(pos["latitude"], 7) == 12.3456789
-    assert round(pos["longitude"], 7) == -12.3456789
-    assert pos["altitude"] == 120.0
+    assert pos == {
+        "latitude": 54.3227904,
+        "longitude": 18.6187776,
+        "altitude": 52.0,
+    }

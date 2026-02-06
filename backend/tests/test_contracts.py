@@ -4,9 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 
-import backend.jsonsafe as jsonsafe
 import backend.stats_db as stats_db
-from backend.jsonsafe import json_safe_packet, node_entry, radio_entry
+from backend.jsonsafe import json_safe_packet
 from backend.mesh_service import _channel_entry
 from backend.stats_db import StatsDB
 
@@ -50,32 +49,6 @@ def test_json_safe_packet_fromid_bytes_snapshot():
     assert out == load_expected("json_safe_packet_fromid_bytes.json")
 
 
-def test_node_entry_happy_snapshot(monkeypatch):
-    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: FIXED_NOW)
-    node = load_json("node_happy.json")
-    out = node_entry("!abcd", node)
-    assert out == load_expected("node_entry_happy.json")
-
-
-def test_node_entry_snake_case_snapshot(monkeypatch):
-    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: FIXED_NOW)
-    node = load_json("node_snake_case.json")
-    out = node_entry("!abcd", node)
-    assert out == load_expected("node_entry_snake_case.json")
-
-
-def test_node_entry_firmware_dict_snapshot(monkeypatch):
-    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: FIXED_NOW)
-    node = load_json("node_firmware_dict.json")
-    out = node_entry("!abcd", node)
-    assert out == load_expected("node_entry_firmware_dict.json")
-
-
-def test_radio_entry_position_snapshot(monkeypatch):
-    monkeypatch.setattr(jsonsafe, "now_epoch", lambda: FIXED_NOW)
-    node = load_json("radio_position.json")
-    out = radio_entry(node)
-    assert out == load_expected("radio_entry_position.json")
 
 
 def test_channel_entry_primary_snapshot():

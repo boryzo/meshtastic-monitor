@@ -196,9 +196,13 @@ def test_sms_relay_filters_by_type(monkeypatch):
         phone="p",
         allow_types="TEXT",
     )
-    relay.send_message({"fromId": "!a", "toId": "!b", "portnum": 5, "text": ""})
+    relay.send_message(
+        {"fromId": "!a", "toId": "!b", "portnum": "ROUTING_APP", "app": "ROUTING_APP", "text": ""}
+    )
     assert called["ok"] is False
 
-    relay.update_config(allow_types="5")
-    relay.send_message({"fromId": "!a", "toId": "!b", "portnum": 5, "text": ""})
+    relay.update_config(allow_types="ROUTING_APP")
+    relay.send_message(
+        {"fromId": "!a", "toId": "!b", "portnum": "ROUTING_APP", "app": "ROUTING_APP", "text": ""}
+    )
     assert called["ok"] is True

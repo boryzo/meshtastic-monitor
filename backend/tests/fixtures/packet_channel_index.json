@@ -1,7 +1,7 @@
 {
   "rxTime": 1,
-  "channelIndex": 0,
+  "channel": 0,
   "decoded": {
-    "portnum": 1
+    "portnum": "POSITION_APP"
   }
 }

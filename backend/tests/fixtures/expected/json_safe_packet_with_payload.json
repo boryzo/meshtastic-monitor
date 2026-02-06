@@ -6,7 +6,7 @@
   "rssi": -100,
   "hopLimit": null,
   "channel": null,
-  "portnum": 3,
+  "portnum": "POSITION_APP",
   "app": "POSITION_APP",
   "requestId": null,
   "wantResponse": null,

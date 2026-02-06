@@ -28,7 +28,7 @@ def test_stats_db_counts_and_top_nodes():
             "toId": "!b",
             "snr": -1,
             "rssi": -100,
-            "portnum": 3,
+            "portnum": "POSITION_APP",
             "text": "hi",
             "payload_b64": None,
             "requestId": 12,
@@ -42,7 +42,7 @@ def test_stats_db_counts_and_top_nodes():
             "toId": "!c",
             "snr": 0.5,
             "rssi": -90,
-            "portnum": 0x43,
+            "portnum": "TELEMETRY_APP",
             "text": "",
             "payload_b64": "AQI=",
         }
@@ -55,7 +55,7 @@ def test_stats_db_counts_and_top_nodes():
             "snr": 0,
             "rssi": -80,
             "app": "NODEINFO_APP",
-            "portnum": 4,
+            "portnum": "NODEINFO_APP",
             "text": "",
             "payload_b64": None,
         }
@@ -67,7 +67,7 @@ def test_stats_db_counts_and_top_nodes():
             "toId": "^all",
             "snr": -2,
             "rssi": -95,
-            "portnum": 5,
+            "portnum": "ROUTING_APP",
             "text": "",
             "payload_b64": None,
             "wantResponse": True,
@@ -118,7 +118,7 @@ def test_stats_db_hourly_buckets_are_rounded_to_hour():
             "toId": "!b",
             "snr": None,
             "rssi": None,
-            "portnum": 1,
+            "portnum": "POSITION_APP",
             "text": "x",
             "payload_b64": None,
         }
@@ -130,7 +130,7 @@ def test_stats_db_hourly_buckets_are_rounded_to_hour():
             "toId": "!b",
             "snr": None,
             "rssi": None,
-            "portnum": 1,
+            "portnum": "POSITION_APP",
             "text": "y",
             "payload_b64": None,
         }
@@ -149,7 +149,6 @@ def test_stats_db_record_nodes_snapshot_and_known_entries():
         {
             "!n1": {
                 "user": {"shortName": "S1", "longName": "Node One", "role": "CLIENT", "hwModel": "TBEAM"},
-                "firmwareVersion": "2.4.0",
                 "hopsAway": 3,
                 "lastHeard": now - 10,
                 "snr": 2,
@@ -169,7 +168,7 @@ def test_stats_db_record_nodes_snapshot_and_known_entries():
     assert entries["!n1"]["quality"] == "good"
     assert entries["!n1"]["role"] == "CLIENT"
     assert entries["!n1"]["hwModel"] == "TBEAM"
-    assert entries["!n1"]["firmware"] == "2.4.0"
+    assert entries["!n1"]["firmware"] is None
     assert entries["!n2"]["quality"] is None
     assert entries["!n2"]["role"] == "ROUTER"
     assert entries["!n2"]["hwModel"] == "HELTEC_V3"
@@ -182,7 +181,7 @@ def test_stats_db_record_nodes_snapshot_and_known_entries():
             "toId": "!n2",
             "snr": -3,
             "rssi": -100,
-            "portnum": 1,
+            "portnum": "POSITION_APP",
             "text": "hi",
             "payload_b64": None,
         }
@@ -199,7 +198,6 @@ def test_stats_db_get_node_stats():
         {
             "!n1": {
                 "user": {"shortName": "S1", "longName": "Node One", "role": "CLIENT", "hwModel": "TBEAM"},
-                "firmwareVersion": "2.4.0",
                 "hopsAway": 2,
                 "lastHeard": now - 10,
                 "snr": 1,
@@ -213,7 +211,7 @@ def test_stats_db_get_node_stats():
             "toId": "!n2",
             "snr": -3,
             "rssi": -100,
-            "portnum": 1,
+            "portnum": "POSITION_APP",
             "text": "hi",
             "payload_b64": None,
         }
@@ -224,64 +222,8 @@ def test_stats_db_get_node_stats():
     assert stats["id"] == "!n1"
     assert stats["role"] == "CLIENT"
     assert stats["hwModel"] == "TBEAM"
-    assert stats["firmware"] == "2.4.0"
+    assert stats["firmware"] is None
     assert stats["fromCount"] >= 1
-
-
-def test_stats_db_record_nodes_snapshot_supports_snake_case_keys():
-    db = StatsDB(":memory:")
-    now = FIXED_NOW
-
-    db.record_nodes_snapshot(
-        {
-            "!n1": {
-                "user": {"short_name": "S1", "long_name": "Node One", "role": "CLIENT", "hw_model": "TBEAM"},
-                "device_metadata": {"firmware_version": "2.5.1"},
-                "hops_away": 2,
-                "last_heard": now - 10,
-                "snr": 1,
-            }
-        }
-    )
-
-    entries = {e["id"]: e for e in db.known_node_entries()}
-    assert entries["!n1"]["short"] == "S1"
-    assert entries["!n1"]["long"] == "Node One"
-    assert entries["!n1"]["hopsAway"] == 2
-    assert entries["!n1"]["role"] == "CLIENT"
-    assert entries["!n1"]["hwModel"] == "TBEAM"
-    assert entries["!n1"]["firmware"] == "2.5.1"
-
-
-def test_stats_db_record_nodes_snapshot_reads_firmware_from_user_and_ignores_version_dict():
-    db = StatsDB(":memory:")
-    now = FIXED_NOW
-
-    db.record_nodes_snapshot(
-        {
-            "!n1": {
-                "user": {
-                    "shortName": "S1",
-                    "longName": "Node One",
-                    "role": "CLIENT",
-                    "hwModel": "TBEAM",
-                    "firmwareVersion": "2.7.1",
-                },
-                "lastHeard": now - 10,
-                "snr": 1,
-            },
-            "!n2": {
-                "user": {"shortName": "S2", "longName": "Node Two"},
-                "firmwareVersion": {"major": 2, "minor": 6, "patch": 0},
-                "lastHeard": now - 10,
-                "snr": 1,
-            },
-        }
-    )
-
-    entries = {e["id"]: e for e in db.known_node_entries()}
-    assert entries["!n1"]["firmware"] == "2.7.1"
-    assert entries["!n2"]["firmware"] is None
 
 
 def test_stats_db_message_history_persists():
@@ -297,7 +239,7 @@ def test_stats_db_message_history_persists():
             "rssi": -100,
             "hopLimit": 3,
             "channel": 0,
-            "portnum": 1,
+            "portnum": "POSITION_APP",
             "text": "hi",
             "payload_b64": None,
         }
@@ -319,7 +261,7 @@ def test_stats_db_list_messages_order_and_offset():
                 "toId": "!x",
                 "snr": 1,
                 "rssi": -90,
-                "portnum": 1,
+                "portnum": "POSITION_APP",
                 "text": f"m{rx}",
                 "payload_b64": None,
             }
@@ -364,7 +306,7 @@ def test_stats_db_known_entries_leaves_hops_away_empty_when_missing():
             "toId": "!n2",
             "snr": 1,
             "rssi": -100,
-            "portnum": 1,
+            "portnum": "POSITION_APP",
             "text": "hi",
             "payload_b64": None,
         }
@@ -451,3 +393,167 @@ def test_stats_db_list_status_reports_ordering():
     desc = db.list_status_reports(limit=3, order="desc")
     assert [i["batteryPercent"] for i in asc] == [10, 20, 30]
     assert [i["batteryPercent"] for i in desc] == [30, 20, 10]
+
+
+def test_stats_db_record_message_defaults_time_and_tracks_text_payload():
+    db = StatsDB(":memory:")
+    db.record_message(
+        {
+            "rxTime": None,
+            "fromId": "!n1",
+            "toId": "!n2",
+            "snr": 1,
+            "rssi": -100,
+            "portnum": "POSITION_APP",
+            "text": "hi",
+            "payload_b64": "AA==",
+        }
+    )
+
+    msgs = db.list_messages(limit=10, order="asc")
+    assert msgs[0]["rxTime"] == FIXED_NOW
+
+    summary = db.summary()
+    assert summary.counters["messages_total"] == 1
+    assert summary.counters["messages_text"] == 1
+    assert summary.counters["messages_payload"] == 1
+
+
+def test_stats_db_record_message_stores_error_and_request_flags():
+    db = StatsDB(":memory:")
+    db.record_message(
+        {
+            "rxTime": 123,
+            "fromId": "!n1",
+            "toId": "!n2",
+            "snr": 1,
+            "rssi": -90,
+            "portnum": "POSITION_APP",
+            "text": "hello",
+            "wantResponse": True,
+            "error": "bad news",
+        }
+    )
+
+    msg = db.list_messages(limit=10, order="asc")[0]
+    assert msg["wantResponse"] is True
+    assert msg["requestId"] is None
+    assert msg["error"] == "bad news"
+
+
+def test_stats_db_list_messages_limit_zero_returns_all():
+    db = StatsDB(":memory:")
+    for rx in [1, 2, 3]:
+        db.record_message(
+            {
+                "rxTime": rx,
+                "fromId": f"!n{rx}",
+                "toId": "!x",
+                "snr": 1,
+                "rssi": -90,
+                "portnum": "POSITION_APP",
+                "text": f"m{rx}",
+                "payload_b64": None,
+            }
+        )
+
+    msgs = db.list_messages(limit=0, order="asc")
+    assert [m["rxTime"] for m in msgs] == [1, 2, 3]
+
+
+def test_stats_db_node_history_respects_interval(monkeypatch):
+    db = StatsDB(":memory:", nodes_history_interval_sec=60)
+    times = iter([1000, 1001, 1100])
+    monkeypatch.setattr(stats_db, "now_epoch", lambda: next(times))
+
+    nodes = {
+        "!n1": {"user": {"shortName": "S1"}, "snr": 1, "lastHeard": 999, "hopsAway": 1}
+    }
+    db.record_nodes_snapshot(nodes)
+    db.record_nodes_snapshot(nodes)
+    db.record_nodes_snapshot(nodes)
+
+    items = db.list_node_history(node_id="!n1", limit=10, order="asc")
+    assert len(items) == 2
+    assert [i["ts"] for i in items] == [1000, 1100]
+
+
+def test_stats_db_list_node_history_since_order_and_limit(monkeypatch):
+    db = StatsDB(":memory:", nodes_history_interval_sec=0)
+    times = iter([100, 200, 300])
+    monkeypatch.setattr(stats_db, "now_epoch", lambda: next(times))
+
+    nodes = {"!n1": {"user": {"shortName": "S1"}, "snr": 1, "lastHeard": 90}}
+    db.record_nodes_snapshot(nodes)
+    db.record_nodes_snapshot(nodes)
+    db.record_nodes_snapshot(nodes)
+
+    items = db.list_node_history(node_id="!n1", since=200, order="asc", limit=1)
+    assert [i["ts"] for i in items] == [200]
+
+    all_items = db.list_node_history(node_id="!n1", since=200, order="asc", limit=0)
+    assert [i["ts"] for i in all_items] == [200, 300]
+
+
+def test_stats_db_record_status_report_ignores_non_dict():
+    db = StatsDB(":memory:", status_history_interval_sec=0)
+    db.record_status_report(["nope"])
+    assert db.list_status_reports(limit=10, order="asc") == []
+
+
+def test_stats_db_list_status_reports_since_and_limit_zero(monkeypatch):
+    db = StatsDB(":memory:", status_history_interval_sec=0)
+    times = iter([100, 200, 300])
+    monkeypatch.setattr(stats_db, "now_epoch", lambda: next(times))
+    db.record_status_report({"power": {"battery_percent": 10}})
+    db.record_status_report({"power": {"battery_percent": 20}})
+    db.record_status_report({"power": {"battery_percent": 30}})
+
+    items = db.list_status_reports(since=200, order="asc", limit=0)
+    assert [i["batteryPercent"] for i in items] == [20, 30]
+
+
+def test_stats_db_summary_app_requests_excludes_local_node():
+    db = StatsDB(":memory:")
+    db.record_message(
+        {
+            "rxTime": 100,
+            "fromId": "!me",
+            "toId": "^all",
+            "snr": 1,
+            "rssi": -90,
+            "portnum": "POSITION_APP",
+            "text": "x",
+            "requestId": 1,
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 101,
+            "fromId": "!other",
+            "toId": "!me",
+            "snr": 1,
+            "rssi": -90,
+            "portnum": "POSITION_APP",
+            "text": "x",
+            "requestId": 2,
+        }
+    )
+
+    summary = db.summary(local_node_id="!me")
+    reqs = {(r["app"], r["fromId"], r["toId"]) for r in summary.app_requests_to_me}
+    assert ("POSITION_APP", "!me", "^all") not in reqs
+    assert ("POSITION_APP", "!other", "!me") in reqs
+
+
+def test_stats_db_record_mesh_event_unknown_key():
+    db = StatsDB(":memory:")
+    db.record_mesh_event("custom", "x")
+    summary = db.summary()
+    assert summary.counters["mesh_custom"] == 1
+    assert summary.recent_events[-1]["event"] == "mesh_custom"
+
+
+def test_stats_db_get_node_stats_empty_returns_none():
+    db = StatsDB(":memory:")
+    assert db.get_node_stats("") is None

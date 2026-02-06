@@ -17,7 +17,6 @@ def client():
         {
             "!direct": {
                 "user": {"shortName": "D", "longName": "Direct", "role": "CLIENT", "hwModel": "TBEAM"},
-                "firmwareVersion": "2.4.0",
                 "snr": 1,
                 "hopsAway": 1,
                 "lastHeard": FIXED_NOW,
@@ -40,7 +39,7 @@ def client():
                 "rssi": -100,
                 "hopLimit": 3,
                 "channel": 0,
-                "portnum": 3,
+                "portnum": "POSITION_APP",
                 "text": "hi",
                 "payload_b64": None,
             }
@@ -65,7 +64,7 @@ def client():
             "rssi": -100,
             "hopLimit": 3,
             "channel": 0,
-            "portnum": 3,
+            "portnum": "POSITION_APP",
             "text": "hi",
             "payload_b64": None,
         }
@@ -172,7 +171,7 @@ def test_nodes_split_direct_and_relayed(client):
     assert relayed["hopsAway"] == 2
     assert direct["role"] == "CLIENT"
     assert direct["hwModel"] == "TBEAM"
-    assert direct["firmware"] == "2.4.0"
+    assert direct["firmware"] is None
     assert relayed["role"] == "ROUTER"
     assert relayed["hwModel"] == "HELTEC_V3"
 
@@ -355,7 +354,7 @@ def test_messages_pagination_and_order():
                 "toId": "!x",
                 "snr": 1,
                 "rssi": -100,
-                "portnum": 1,
+                "portnum": "POSITION_APP",
                 "text": f"m{rx}",
                 "payload_b64": None,
             }
