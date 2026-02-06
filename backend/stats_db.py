@@ -1032,7 +1032,7 @@ class StatsDB:
             order_col = "to_count"
         rows = self._conn.execute(
             f"""
-            SELECT node_id, from_count, to_count, last_rx, last_snr, last_rssi
+            SELECT node_id, short, long, from_count, to_count, last_rx, last_snr, last_rssi
             FROM node_counts
             ORDER BY {order_col} DESC
             LIMIT ?
@@ -1047,6 +1047,8 @@ class StatsDB:
             out.append(
                 {
                     "id": str(r["node_id"]),
+                    "short": r["short"],
+                    "long": r["long"],
                     "count": count,
                     "lastRx": r["last_rx"],
                     "lastSnr": r["last_snr"],

@@ -298,6 +298,19 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+function nodeLabelHtml(node) {
+  const short = (node && node.short ? String(node.short).trim() : "") || "";
+  const long = (node && node.long ? String(node.long).trim() : "") || "";
+  const id = (node && node.id ? String(node.id).trim() : "") || "";
+  const primary = short || long || id || "—";
+  const secondaryParts = [];
+  if (short && long && long !== short) secondaryParts.push(long);
+  if (id && id !== primary) secondaryParts.push(id);
+  const secondary = secondaryParts.length
+    ? `<div class="muted mono">${escapeHtml(secondaryParts.join(" • "))}</div>`
+    : "";
+  return `<div>${escapeHtml(primary)}</div>${secondary}`;
+}
 async function tickStatus() {
   try {
     const h = await apiFetch("/api/status");
@@ -1072,7 +1085,7 @@ function renderStats(data) {
     nodes.topFrom || [],
     (n) =>
       `<div class="list-row">
-        <div class="mono">${escapeHtml(n.id || "—")}</div>
+        <div>${nodeLabelHtml(n)}</div>
         <div>${fmtCount(n.count)} msgs</div>
         <div class="muted">${n.lastSnr !== null && n.lastSnr !== undefined ? `SNR ${n.lastSnr}` : ""}</div>
       </div>`,
@@ -1083,7 +1096,7 @@ function renderStats(data) {
     nodes.topTo || [],
     (n) =>
       `<div class="list-row">
-        <div class="mono">${escapeHtml(n.id || "—")}</div>
+        <div>${nodeLabelHtml(n)}</div>
         <div>${fmtCount(n.count)} msgs</div>
         <div class="muted">${n.lastRssi !== null && n.lastRssi !== undefined ? `RSSI ${n.lastRssi}` : ""}</div>
       </div>`,
