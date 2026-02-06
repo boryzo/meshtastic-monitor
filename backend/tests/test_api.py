@@ -495,14 +495,14 @@ def test_config_updates_sms_settings():
             "smsEnabled": True,
             "smsApiUrl": "https://example.invalid/sms",
             "smsApiKey": "secret",
-            "smsPhone": "REDACTED",
+            "smsPhone": "600000000",
         },
     )
     assert res.status_code == 200
     sms = svc.get_sms_config()
     assert sms["enabled"] is True
     assert sms["apiUrl"] == "https://example.invalid/sms"
-    assert sms["phone"] == "REDACTED"
+    assert sms["phone"] == "600000000"
     assert sms["apiKeySet"] is True
 
 

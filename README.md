@@ -76,11 +76,7 @@ If you want **every incoming packet** forwarded via SMS, configure it in Setting
 - Enable **SMS relay**
 - Set **SMS API URL**, **API key**, and **Phone**
 
-Example API format:
-
-```
-https://your-sms-gateway.example/api?api_key=YOUR_KEY&phone=REDACTED&message=hello
-```
+Example API format: configured by your provider.
 
 ## Command-line options (copy/paste)
 
