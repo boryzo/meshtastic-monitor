@@ -206,3 +206,38 @@ def test_sms_relay_filters_by_type(monkeypatch):
         {"fromId": "!a", "toId": "!b", "portnum": "ROUTING_APP", "app": "ROUTING_APP", "text": ""}
     )
     assert called["ok"] is True
+
+
+def test_sms_relay_gsm7_sanitize_removes_non_gsm7():
+    text = "Zażółć gęślą jaźń 😀 → €"
+    sanitized = sms_relay._gsm7_sanitize(text)
+    assert "ż" not in sanitized
+    assert "ó" not in sanitized
+    assert "ł" not in sanitized
+    assert "ę" not in sanitized
+    assert "ś" not in sanitized
+    assert "ź" not in sanitized
+    assert "ń" not in sanitized
+    assert "😀" not in sanitized
+    assert "→" not in sanitized
+    assert "€" in sanitized
+    assert all(
+        ch in sms_relay._GSM7_BASIC or ch in sms_relay._GSM7_EXTENDED for ch in sanitized
+    )
+
+
+def test_sms_relay_format_message_uses_gsm7_only():
+    relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
+    msg = {"fromId": "!a", "toId": "!b", "text": "Cześć 😀 €"}
+    formatted = relay._format_message(msg)
+    assert "->" in formatted
+    assert "😀" not in formatted
+    assert "ć" not in formatted
+    assert "€" in formatted
+    assert "Cze" in formatted
+
+
+def test_sms_relay_format_message_port_placeholder_is_gsm7():
+    relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
+    formatted = relay._format_message({"fromId": "!a", "toId": "!b", "text": ""})
+    assert "port ?" in formatted

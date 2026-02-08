@@ -94,6 +94,16 @@ The app will keep a single connection to your radio and expose a TCP port for ot
 Other clients should then connect to your app machine on `RELAY_HOST:RELAY_PORT`
 instead of connecting directly to the radio.
 
+**Where to see relay status**
+
+- UI: **Stats → TCP Relay** (upstream status + connected clients)
+- API: `GET /api/relay`
+
+**Security note**
+
+Binding to `0.0.0.0` exposes the relay to your LAN. Do **not** expose it to the public internet
+unless you add firewall rules.
+
 ## Command-line options (copy/paste)
 
 Show all options:
@@ -161,6 +171,8 @@ python -m meshtastic_monitor --log-file /path/to/meshmon.log
 ```
 
 Logs are rotated (to avoid infinite growth): ~2MB per file, up to 3 backups.
+
+TCP relay events (listen/upstream/client connect/disconnect) are logged to the same file.
 
 ## How it works (simple mental model)
 
@@ -232,6 +244,7 @@ Quick overview:
 - `GET /api/nodes` – live nodes (direct + relayed)
 - `GET /api/messages` – message history (SQLite if enabled, else memory)
 - `POST /api/send` – send text (optional `to` and `channel`)
+- `GET /api/relay` – TCP relay status + connected clients
 - `GET /api/stats` – aggregates + charts data
 - `GET /api/node/<id>` – combined live + persisted stats for one node
 - `GET /api/nodes/history` / `GET /api/node/<id>/history` – history samples

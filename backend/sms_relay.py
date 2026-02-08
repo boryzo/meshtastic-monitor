@@ -13,6 +13,26 @@ from backend.jsonsafe import clamp_str
 
 logger = logging.getLogger(__name__)
 
+_GSM7_BASIC = set(
+    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ"
+    "ÆæßÉ "
+    "!\"#¤%&'()*+,-./"
+    "0123456789"
+    ":;<=>?"
+    "¡"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "ÄÖÑÜ§¿"
+    "abcdefghijklmnopqrstuvwxyz"
+    "äöñüà"
+)
+_GSM7_EXTENDED = set("^{}\\[~]|€\f")
+
+
+def _gsm7_sanitize(text: str) -> str:
+    if not text:
+        return ""
+    return "".join(ch for ch in text if ch in _GSM7_BASIC or ch in _GSM7_EXTENDED)
+
 
 class SmsRelay:
     def __init__(
@@ -91,8 +111,9 @@ class SmsRelay:
             body = text.strip()
         else:
             port = msg.get("portnum")
-            body = f"port {port if port is not None else '—'}"
-        combined = f"{from_id}→{to_id}: {body}"
+            body = f"port {port if port is not None else '?'}"
+        combined = f"{from_id}->{to_id}: {body}"
+        combined = _gsm7_sanitize(combined).strip()
         return clamp_str(combined, 300) or combined[:300]
 
     def _ready(self) -> bool:
