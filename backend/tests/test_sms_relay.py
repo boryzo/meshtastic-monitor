@@ -71,6 +71,8 @@ def test_sms_relay_sends_and_logs_without_url_or_key(monkeypatch, caplog):
     relay.send_message({"fromId": "!a", "toId": "!b", "text": "hello"})
 
     log_text = "\n".join(r.message for r in caplog.records)
+    assert "SMS relay dispatch" in log_text
+    assert "hello" in log_text
     assert "SMS relay sent" in log_text
     assert api_url not in log_text
     assert api_key not in log_text
@@ -205,7 +207,7 @@ def test_sms_relay_filters_by_type(monkeypatch):
     relay.send_message(
         {"fromId": "!a", "toId": "!b", "portnum": "ROUTING_APP", "app": "ROUTING_APP", "text": ""}
     )
-    assert called["ok"] is True
+    assert called["ok"] is False
 
 
 def test_sms_relay_gsm7_sanitize_removes_non_gsm7():
@@ -221,6 +223,7 @@ def test_sms_relay_gsm7_sanitize_removes_non_gsm7():
     assert "😀" not in sanitized
     assert "→" not in sanitized
     assert "€" in sanitized
+    assert "Zazolc" in sanitized
     assert all(
         ch in sms_relay._GSM7_BASIC or ch in sms_relay._GSM7_EXTENDED for ch in sanitized
     )
@@ -234,10 +237,19 @@ def test_sms_relay_format_message_uses_gsm7_only():
     assert "😀" not in formatted
     assert "ć" not in formatted
     assert "€" in formatted
-    assert "Cze" in formatted
+    assert "Czesc" in formatted
 
 
-def test_sms_relay_format_message_port_placeholder_is_gsm7():
+def test_sms_relay_skips_when_no_text(monkeypatch):
+    called = {"ok": False}
+
+    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+        called["ok"] = True
+        return _DummyResponse()
+
+    monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sms_relay.threading, "Thread", _ImmediateThread)
+
     relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
-    formatted = relay._format_message({"fromId": "!a", "toId": "!b", "text": ""})
-    assert "port ?" in formatted
+    relay.send_message({"fromId": "!a", "toId": "!b", "text": ""})
+    assert called["ok"] is False

@@ -27,11 +27,43 @@ _GSM7_BASIC = set(
 )
 _GSM7_EXTENDED = set("^{}\\[~]|€\f")
 
+_PL_MAP = {
+    "ą": "a",
+    "ć": "c",
+    "ę": "e",
+    "ł": "l",
+    "ń": "n",
+    "ó": "o",
+    "ś": "s",
+    "ż": "z",
+    "ź": "z",
+    "Ą": "A",
+    "Ć": "C",
+    "Ę": "E",
+    "Ł": "L",
+    "Ń": "N",
+    "Ó": "O",
+    "Ś": "S",
+    "Ż": "Z",
+    "Ź": "Z",
+}
+
+
+def _gsm7_normalize(text: str) -> str:
+    if not text:
+        return ""
+    out = text
+    for src, dst in _PL_MAP.items():
+        out = out.replace(src, dst)
+    out = out.replace("→", "->")
+    return out
+
 
 def _gsm7_sanitize(text: str) -> str:
     if not text:
         return ""
-    return "".join(ch for ch in text if ch in _GSM7_BASIC or ch in _GSM7_EXTENDED)
+    normalized = _gsm7_normalize(text)
+    return "".join(ch for ch in normalized if ch in _GSM7_BASIC or ch in _GSM7_EXTENDED)
 
 
 class SmsRelay:
@@ -101,17 +133,17 @@ class SmsRelay:
         if not self._is_allowed(msg):
             return
         message = self._format_message(msg)
+        if not message:
+            return
         self._send_async(message)
 
     def _format_message(self, msg: Dict[str, Any]) -> str:
         from_id = msg.get("fromId") or "?"
         to_id = msg.get("toId") or "?"
         text = msg.get("text")
-        if isinstance(text, str) and text.strip():
-            body = text.strip()
-        else:
-            port = msg.get("portnum")
-            body = f"port {port if port is not None else '?'}"
+        if not isinstance(text, str) or not text.strip():
+            return ""
+        body = text.strip()
         combined = f"{from_id}->{to_id}: {body}"
         combined = _gsm7_sanitize(combined).strip()
         return clamp_str(combined, 300) or combined[:300]
@@ -164,6 +196,7 @@ class SmsRelay:
                 "phone": phone,
                 "message": message,
             }
+            logger.info("SMS relay dispatch (msg=%s)", message)
             qs = urllib.parse.urlencode(params, doseq=False, safe="")
             url = api_url + ("&" if "?" in api_url else "?") + qs
 
