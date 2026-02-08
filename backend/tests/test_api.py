@@ -514,6 +514,9 @@ def test_send_channel_ok():
     assert res.status_code == 200
     assert res.get_json()["ok"] is True
     assert svc.sent[-1] == ("hello", None, 1)
+    res2 = c.get("/api/messages")
+    msgs = res2.get_json()
+    assert any(m.get("text") == "hello" and m.get("channel") == 1 for m in msgs)
 
 
 def test_send_channel_invalid():

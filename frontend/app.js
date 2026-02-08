@@ -304,15 +304,14 @@ function renderMessages(messages) {
     const snr = m.snr === null || m.snr === undefined ? "—" : String(m.snr);
     const rssi = m.rssi === null || m.rssi === undefined ? "—" : String(m.rssi);
     const chNum = m.channel === null || m.channel === undefined ? null : Number(m.channel);
-    const chMeta = channelInfo(chNum);
-    const chLabel = chMeta.label;
+    const showChannel = selected === "all" && chNum !== null && !Number.isNaN(chNum);
+    const chLabel = showChannel ? channelInfo(chNum).label : "";
     const text = m.text ? escapeHtml(m.text) : `<span class="muted">port ${escapeHtml(String(m.portnum ?? "—"))}</span>`;
     const app = appNameForMessage(m);
     const isRequest = isAppRequestForMe(m, app);
     const appBadge = app && isRequest ? `<span class="pill ok">Request: ${escapeHtml(app)}</span>` : "";
     const direction = localRadioId && m.fromId === localRadioId ? "outgoing" : "incoming";
-    const channelBadge =
-      selected === "all" ? `<span class="pill">${escapeHtml(chLabel)}</span>` : "";
+    const channelBadge = showChannel ? `<span class="pill">${escapeHtml(chLabel)}</span>` : "";
     rows.push(`
       <div class="msg ${direction}">
         <div class="meta">

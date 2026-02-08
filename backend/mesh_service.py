@@ -9,11 +9,12 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from backend.jsonsafe import json_safe_packet, now_epoch
+from backend.jsonsafe import json_safe_packet, now_epoch, radio_entry
 from backend.tcp_relay import TcpRelay
 from backend.sms_relay import SmsRelay
 
 logger = logging.getLogger(__name__)
+TEXT_MESSAGE_APP = "TEXT_MESSAGE_APP"
 
 
 def _first_packet_value(packet: Any, *keys: str) -> Any:
@@ -518,6 +519,44 @@ class MeshService:
             # Let other errors bubble up
             raise
 
+    def record_outgoing_text(
+        self, text: str, to: Optional[str] = None, channel: Optional[int] = None
+    ) -> None:
+        msg_text = str(text or "").strip()
+        if not msg_text:
+            return
+        from_id: Optional[str] = None
+        try:
+            radio = self.get_radio_snapshot()
+            if isinstance(radio, dict):
+                from_id = radio_entry(radio).get("id") or None
+        except Exception:
+            from_id = None
+        msg = {
+            "rxTime": now_epoch(),
+            "fromId": from_id,
+            "toId": to or "^all",
+            "snr": None,
+            "rssi": None,
+            "hopLimit": None,
+            "channel": channel if channel is not None else None,
+            "portnum": TEXT_MESSAGE_APP,
+            "app": TEXT_MESSAGE_APP,
+            "requestId": None,
+            "wantResponse": None,
+            "text": msg_text,
+            "payload_b64": None,
+        }
+        with self._messages_lock:
+            self._messages_cache.append(msg)
+            if len(self._messages_cache) > self._max_messages:
+                self._messages_cache[:] = self._messages_cache[-self._max_messages :]
+        if self._stats_db is not None:
+            try:
+                self._stats_db.record_message(msg)
+            except Exception:
+                pass
+
     # ---- internal
     def _set_connected(self, connected: bool) -> None:
         with self._connected_lock:
@@ -803,6 +842,7 @@ class FakeMeshService:
         self._status_fetched_at: Optional[int] = None
         self._diag: List[Dict[str, Any]] = []
         self.sent: List[Tuple[str, Optional[str], Optional[int]]] = []
+        self._stats_db: Optional[Any] = None
         self._sms_enabled = False
         self._sms_api_url = ""
         self._sms_api_key = ""
@@ -936,6 +976,35 @@ class FakeMeshService:
             raise ValueError("text is required")
         ch = int(channel) if channel is not None else None
         self.sent.append((text, to, ch))
+
+    def record_outgoing_text(
+        self, text: str, to: Optional[str] = None, channel: Optional[int] = None
+    ) -> None:
+        msg_text = str(text or "").strip()
+        if not msg_text:
+            return
+        self._messages.append(
+            {
+                "rxTime": now_epoch(),
+                "fromId": None,
+                "toId": to or "^all",
+                "snr": None,
+                "rssi": None,
+                "hopLimit": None,
+                "channel": int(channel) if channel is not None else None,
+                "portnum": TEXT_MESSAGE_APP,
+                "app": TEXT_MESSAGE_APP,
+                "requestId": None,
+                "wantResponse": None,
+                "text": msg_text,
+                "payload_b64": None,
+            }
+        )
+        if self._stats_db is not None:
+            try:
+                self._stats_db.record_message(self._messages[-1])
+            except Exception:
+                pass
 
     # helpers for tests
     def seed_nodes(self, nodes: Dict[str, Dict[str, Any]]) -> None:

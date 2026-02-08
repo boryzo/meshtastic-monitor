@@ -186,6 +186,12 @@ def create_app(
             sms_timeout_sec=_get_env_float("SMS_TIMEOUT_SEC", 4.0),
         )
         mesh_service.start()
+    elif stats_db is not None:
+        try:
+            if getattr(mesh_service, "_stats_db", None) is None:
+                setattr(mesh_service, "_stats_db", stats_db)
+        except Exception:
+            pass
     # --- frontend routes
     @app.get("/")
     def index() -> Response:
@@ -589,6 +595,12 @@ def create_app(
                 return jsonify({"ok": False, "error": "channel must be >= 0"}), 400
         try:
             mesh_service.send_text(text.strip(), to_clean, channel=channel_clean)
+            recorder = getattr(mesh_service, "record_outgoing_text", None)
+            if callable(recorder):
+                try:
+                    recorder(text.strip(), to_clean, channel_clean)
+                except Exception:
+                    pass
             if stats_db is not None:
                 stats_db.record_send(ok=True)
             return jsonify({"ok": True})
