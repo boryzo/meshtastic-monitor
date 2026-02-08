@@ -554,6 +554,9 @@ def test_config_get_includes_sms_defaults(client):
     assert body["sms"]["apiKeySet"] is False
     assert body["sms"]["allowFromIds"] == "ALL"
     assert body["sms"]["allowTypes"] == "ALL"
+    assert body["relay"]["enabled"] is False
+    assert body["relay"]["listenHost"] in {None, "0.0.0.0"}
+    assert body["relay"]["listenPort"] in {None, 4403}
 
 
 def test_config_updates_sms_settings():
@@ -583,6 +586,44 @@ def test_config_updates_sms_settings():
     assert sms["allowFromIds"] == "!abcd1234"
     assert sms["allowTypes"] == "TEXT,3"
 
+def test_config_updates_relay_settings():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.post(
+        "/api/config",
+        json={
+            "relayEnabled": True,
+            "relayHost": "0.0.0.0",
+            "relayPort": 4404,
+        },
+    )
+    assert res.status_code == 200
+    relay = svc.get_relay_stats()
+    assert relay["enabled"] is True
+    assert relay["listenHost"] == "0.0.0.0"
+    assert relay["listenPort"] == 4404
+
+def test_relay_status_endpoint():
+    svc = FakeMeshService()
+    svc.start()
+    svc._relay_enabled = True
+    svc._relay_host = "0.0.0.0"
+    svc._relay_port = 4403
+    svc._relay_clients = [{"addr": "10.0.0.2", "port": 1234, "connectedAt": 1, "lastSeen": 2}]
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.get("/api/relay")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["enabled"] is True
+    assert body["clientCount"] == 1
+    assert body["clients"][0]["addr"] == "10.0.0.2"
 
 def test_config_rejects_bad_sms_types(client):
     res = client.post("/api/config", json={"smsEnabled": "maybe"})

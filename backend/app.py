@@ -208,12 +208,27 @@ def create_app(
             "phone": None,
             "apiKeySet": False,
         }
+        relay_cfg = {
+            "enabled": False,
+            "listenHost": None,
+            "listenPort": None,
+        }
         getter = getattr(mesh_service, "get_sms_config", None)
         if callable(getter):
             try:
                 result = getter()
                 if isinstance(result, dict):
                     sms_cfg.update(result)
+            except Exception:
+                pass
+        relay_getter = getattr(mesh_service, "get_relay_stats", None)
+        if callable(relay_getter):
+            try:
+                result = relay_getter()
+                if isinstance(result, dict):
+                    relay_cfg["enabled"] = bool(result.get("enabled"))
+                    relay_cfg["listenHost"] = result.get("listenHost")
+                    relay_cfg["listenPort"] = result.get("listenPort")
             except Exception:
                 pass
         cfg_path = os.getenv("MESHMON_CONFIG", "").strip() or None
@@ -224,6 +239,7 @@ def create_app(
                 "meshHost": (cfg.mesh_host or None),
                 "meshPort": cfg.mesh_port,
                 "sms": sms_cfg,
+                "relay": relay_cfg,
                 "configPath": cfg_path,
                 "generatedAt": now_epoch(),
             }
@@ -258,6 +274,19 @@ def create_app(
         )
         payload["generatedAt"] = now_epoch()
         return jsonify(payload)
+    @app.get("/api/relay")
+    def api_relay():
+        getter = getattr(mesh_service, "get_relay_stats", None)
+        relay_stats = None
+        if callable(getter):
+            try:
+                relay_stats = getter()
+            except Exception:
+                relay_stats = None
+        if not isinstance(relay_stats, dict):
+            relay_stats = {"enabled": False, "clientCount": 0, "clients": []}
+        relay_stats["generatedAt"] = now_epoch()
+        return jsonify(relay_stats)
     @app.get("/api/nodes")
     def api_nodes():
         include_observed_raw = request.args.get("includeObserved", "1")
@@ -581,8 +610,12 @@ def create_app(
         sms_phone = body.get("smsPhone")
         sms_allow_from_ids = body.get("smsAllowFromIds")
         sms_allow_types = body.get("smsAllowTypes")
+        relay_enabled = body.get("relayEnabled")
+        relay_host = body.get("relayHost")
+        relay_port = body.get("relayPort")
         kwargs: Dict[str, Any] = {}
         sms_kwargs: Dict[str, Any] = {}
+        relay_kwargs: Dict[str, Any] = {}
         if mesh_host is not None:
             if not isinstance(mesh_host, str) or not mesh_host.strip():
                 return jsonify({"ok": False, "error": "meshHost must be a non-empty string"}), 400
@@ -617,7 +650,24 @@ def create_app(
             if not isinstance(sms_allow_types, str):
                 return jsonify({"ok": False, "error": "smsAllowTypes must be a string"}), 400
             sms_kwargs["allow_types"] = sms_allow_types.strip()
-        if not kwargs and not sms_kwargs:
+        if relay_enabled is not None:
+            parsed = _parse_bool_value(relay_enabled)
+            if parsed is None:
+                return jsonify({"ok": False, "error": "relayEnabled must be a boolean"}), 400
+            relay_kwargs["enabled"] = parsed
+        if relay_host is not None:
+            if not isinstance(relay_host, str):
+                return jsonify({"ok": False, "error": "relayHost must be a string"}), 400
+            relay_kwargs["listen_host"] = relay_host.strip() or "0.0.0.0"
+        if relay_port is not None:
+            try:
+                relay_port_val = int(relay_port)
+            except Exception:
+                return jsonify({"ok": False, "error": "relayPort must be an int"}), 400
+            if relay_port_val <= 0 or relay_port_val > 65535:
+                return jsonify({"ok": False, "error": "relayPort must be 1..65535"}), 400
+            relay_kwargs["listen_port"] = relay_port_val
+        if not kwargs and not sms_kwargs and not relay_kwargs:
             return jsonify({"ok": False, "error": "no config fields provided"}), 400
         try:
             if kwargs:
@@ -626,6 +676,10 @@ def create_app(
                 updater = getattr(mesh_service, "update_sms_config", None)
                 if callable(updater):
                     updater(**sms_kwargs)
+            if relay_kwargs:
+                updater = getattr(mesh_service, "update_relay_config", None)
+                if callable(updater):
+                    updater(**relay_kwargs)
             config_path_raw = os.getenv("MESHMON_CONFIG", "").strip()
             if config_path_raw:
                 updates: Dict[str, Dict[str, Any]] = {}
@@ -647,6 +701,15 @@ def create_app(
                     if "allow_types" in sms_kwargs:
                         sms_updates["allow_types"] = sms_kwargs["allow_types"]
                     updates["sms"] = sms_updates
+                if relay_kwargs:
+                    relay_updates: Dict[str, Any] = {}
+                    if "enabled" in relay_kwargs:
+                        relay_updates["enabled"] = "true" if relay_kwargs["enabled"] else "false"
+                    if "listen_host" in relay_kwargs:
+                        relay_updates["listen_host"] = relay_kwargs["listen_host"]
+                    if "listen_port" in relay_kwargs:
+                        relay_updates["listen_port"] = str(relay_kwargs["listen_port"])
+                    updates["relay"] = relay_updates
                 if updates:
                     update_config(resolve_config_path(config_path_raw), updates)
             return jsonify({"ok": True})

@@ -26,6 +26,7 @@ def test_tcp_relay_broadcasts_and_forwards():
     c1 = _FakeSock()
     c2 = _FakeSock()
     relay._clients = {c1, c2}  # test helper
+    relay._client_info = {c1: {"addr": "1.1.1.1", "port": 123, "connectedAt": 1, "lastSeen": 1}}
 
     relay._broadcast(b"hello")
     assert c1.sent == [b"hello"]
@@ -34,12 +35,17 @@ def test_tcp_relay_broadcasts_and_forwards():
     relay._send_upstream(b"ping")
     assert upstream.sent == [b"ping"]
 
+    stats = relay.get_stats()
+    assert stats["clientCount"] == 1
+    assert stats["clients"][0]["addr"] == "1.1.1.1"
+
 
 def test_tcp_relay_removes_broken_client():
     relay = TcpRelay("127.0.0.1", 0, "upstream", 4403)
     ok = _FakeSock()
     bad = _FakeSock(fail_send=True)
     relay._clients = {ok, bad}  # test helper
+    relay._client_info = {ok: {"addr": "2.2.2.2", "port": 1, "connectedAt": 1, "lastSeen": 1}}
 
     relay._broadcast(b"data")
     assert ok in relay._clients

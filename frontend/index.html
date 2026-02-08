@@ -173,6 +173,10 @@
             <div id="statsNodesVisible" class="bars"></div>
           </div>
           <div class="panel wide">
+            <h3>TCP Relay</h3>
+            <div id="statsRelay" class="list"></div>
+          </div>
+          <div class="panel wide">
             <h3>Messages (hourly)</h3>
             <div id="statsHourly" class="bars"></div>
           </div>
@@ -258,6 +262,27 @@
           <div class="field">
             <label for="meshPortInput">Port</label>
             <input id="meshPortInput" class="input" placeholder="4403" inputmode="numeric" />
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field">
+          <label>
+            <input id="relayEnabled" type="checkbox" />
+            Enable TCP relay
+          </label>
+          <div class="hint">Allow multiple TCP clients by relaying through this app.</div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="relayHost">Relay listen host</label>
+            <input id="relayHost" class="input" placeholder="0.0.0.0" />
+          </div>
+          <div class="field">
+            <label for="relayPort">Relay listen port</label>
+            <input id="relayPort" class="input" placeholder="4403" inputmode="numeric" />
           </div>
         </div>
 

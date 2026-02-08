@@ -8,6 +8,9 @@ const LS = {
   smsPhone: "meshmon.smsPhone",
   smsAllowFromIds: "meshmon.smsAllowFromIds",
   smsAllowTypes: "meshmon.smsAllowTypes",
+  relayEnabled: "meshmon.relayEnabled",
+  relayHost: "meshmon.relayHost",
+  relayPort: "meshmon.relayPort",
   sendChannel: "meshmon.sendChannel",
   messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
@@ -950,12 +953,32 @@ async function tickStats() {
   } catch (e) {
     $("statsMeta").textContent = `Failed to load stats: ${e.message}`;
     $("statsSummary").innerHTML = `<div class="muted">Stats unavailable</div>`;
-    ["statsHourly", "statsNodesVisible", "statsApps", "statsAppRequests", "statsTopFrom", "statsTopTo", "statsEvents"].forEach(
+    [
+      "statsHourly",
+      "statsNodesVisible",
+      "statsRelay",
+      "statsApps",
+      "statsAppRequests",
+      "statsTopFrom",
+      "statsTopTo",
+      "statsEvents",
+    ].forEach(
       (id) => {
         const el = $(id);
         if (el) el.innerHTML = "";
       }
     );
+  }
+}
+
+async function tickRelay() {
+  const el = $("statsRelay");
+  if (!el) return;
+  try {
+    const data = await apiFetch("/api/relay");
+    renderRelayStats(data);
+  } catch (e) {
+    el.innerHTML = `<div class="muted">Relay unavailable</div>`;
   }
 }
 
@@ -1085,6 +1108,46 @@ function renderStatusSummary(latest) {
   rows.push(kv("FS free", fmtBytes(latest.fsFree)));
   el.innerHTML = rows.join("");
 }
+function renderRelayStats(relay) {
+  const el = $("statsRelay");
+  if (!el) return;
+  if (!relay || relay.enabled !== true) {
+    el.innerHTML = `<div class="muted">Relay disabled</div>`;
+    return;
+  }
+  const listen = relay.listenHost && relay.listenPort ? `${relay.listenHost}:${relay.listenPort}` : "—";
+  const upstream = relay.upstreamHost && relay.upstreamPort ? `${relay.upstreamHost}:${relay.upstreamPort}` : "—";
+  const upstreamState = relay.upstreamConnected ? "connected" : "disconnected";
+  const summary = `
+    <div class="list-row">
+      <div>Listening</div>
+      <div class="mono">${escapeHtml(listen)}</div>
+    </div>
+    <div class="list-row">
+      <div>Upstream</div>
+      <div class="mono">${escapeHtml(upstream)} • ${escapeHtml(upstreamState)}</div>
+    </div>
+    <div class="list-row">
+      <div>Clients</div>
+      <div class="mono">${fmtCount(relay.clientCount)}</div>
+    </div>
+  `;
+  const clients = Array.isArray(relay.clients) ? relay.clients : [];
+  if (!clients.length) {
+    el.innerHTML = `${summary}<div class="muted">No clients connected</div>`;
+    return;
+  }
+  const rows = clients.map((c) => {
+    const addr = `${c.addr || "—"}:${c.port || "—"}`;
+    const connectedAt = c.connectedAt ? fmtTime(c.connectedAt) : "—";
+    const lastSeen = c.lastSeen ? fmtTime(c.lastSeen) : "—";
+    return `<div class="list-row">
+      <div class="mono">${escapeHtml(addr)}</div>
+      <div class="muted">conn ${escapeHtml(connectedAt)} • last ${escapeHtml(lastSeen)}</div>
+    </div>`;
+  });
+  el.innerHTML = summary + rows.join("");
+}
 function renderList(elId, items, formatter, emptyText) {
   const el = $(elId);
   if (!el) return;
@@ -1101,6 +1164,7 @@ function renderStats(data) {
     [
       "statsHourly",
       "statsNodesVisible",
+      "statsRelay",
       "statsApps",
       "statsAppRequests",
       "statsTopFrom",
@@ -1328,6 +1392,9 @@ async function openModal() {
   $("apiBaseUrl").value = localStorage.getItem(LS.apiBaseUrl) || "";
   $("meshHostInput").value = localStorage.getItem(LS.meshHost) || "";
   $("meshPortInput").value = localStorage.getItem(LS.meshPort) || "4403";
+  $("relayEnabled").checked = (localStorage.getItem(LS.relayEnabled) || "").trim() === "1";
+  $("relayHost").value = localStorage.getItem(LS.relayHost) || "0.0.0.0";
+  $("relayPort").value = localStorage.getItem(LS.relayPort) || "4403";
   $("smsEnabled").checked = (localStorage.getItem(LS.smsEnabled) || "").trim() === "1";
   $("smsApiUrl").value = localStorage.getItem(LS.smsApiUrl) || "";
   $("smsPhone").value = localStorage.getItem(LS.smsPhone) || "";
@@ -1363,6 +1430,23 @@ async function openModal() {
       localStorage.setItem(LS.smsAllowTypes, sms.allowTypes || "ALL");
       setSmsKeyHint(Boolean(sms.apiKeySet));
     }
+    if (cfg && cfg.relay) {
+      const relay = cfg.relay;
+      const enabled =
+        relay.enabled === true ||
+        String(relay.enabled || "").toLowerCase() === "true" ||
+        String(relay.enabled || "").toLowerCase() === "1";
+      $("relayEnabled").checked = enabled;
+      localStorage.setItem(LS.relayEnabled, enabled ? "1" : "0");
+      if (relay.listenHost) {
+        $("relayHost").value = relay.listenHost;
+        localStorage.setItem(LS.relayHost, relay.listenHost);
+      }
+      if (relay.listenPort) {
+        $("relayPort").value = String(relay.listenPort);
+        localStorage.setItem(LS.relayPort, String(relay.listenPort));
+      }
+    }
   } catch {
     // ignore config fetch errors
   }
@@ -1376,6 +1460,9 @@ async function saveSettings() {
   const apiBaseUrl = ($("apiBaseUrl").value || "").trim();
   const meshHost = ($("meshHostInput").value || "").trim();
   const meshPort = ($("meshPortInput").value || "").trim();
+  const relayEnabled = $("relayEnabled").checked;
+  const relayHost = ($("relayHost").value || "").trim() || "0.0.0.0";
+  const relayPort = ($("relayPort").value || "").trim() || "4403";
   const smsEnabled = $("smsEnabled").checked;
   const smsApiUrl = ($("smsApiUrl").value || "").trim();
   const smsApiKey = ($("smsApiKey").value || "").trim();
@@ -1385,6 +1472,9 @@ async function saveSettings() {
   localStorage.setItem(LS.apiBaseUrl, apiBaseUrl);
   localStorage.setItem(LS.meshHost, meshHost);
   localStorage.setItem(LS.meshPort, meshPort);
+  localStorage.setItem(LS.relayEnabled, relayEnabled ? "1" : "0");
+  localStorage.setItem(LS.relayHost, relayHost);
+  localStorage.setItem(LS.relayPort, relayPort);
   localStorage.setItem(LS.smsEnabled, smsEnabled ? "1" : "0");
   localStorage.setItem(LS.smsApiUrl, smsApiUrl);
   localStorage.setItem(LS.smsPhone, smsPhone);
@@ -1394,9 +1484,16 @@ async function saveSettings() {
     showToast("err", "Meshtastic host is required");
     return;
   }
+  if (relayPort && !Number.isFinite(Number(relayPort))) {
+    showToast("err", "Relay port must be a number");
+    return;
+  }
   const body = {};
   if (meshHost) body.meshHost = meshHost;
   if (meshPort) body.meshPort = Number(meshPort || "4403");
+  if (relayHost) body.relayHost = relayHost;
+  if (relayPort) body.relayPort = Number(relayPort || "4403");
+  body.relayEnabled = relayEnabled;
   body.smsEnabled = smsEnabled;
   body.smsApiUrl = smsApiUrl;
   body.smsPhone = smsPhone;
@@ -1499,6 +1596,7 @@ async function exportConfig() {
         meshHost: h.meshHost,
         meshPort: h.meshPort,
       },
+      relay: runtimeConfig ? runtimeConfig.relay || null : null,
       sms: runtimeConfig ? runtimeConfig.sms || null : null,
       configPath: runtimeConfig ? runtimeConfig.configPath || null : null,
       configError: runtimeConfigError,
@@ -1679,6 +1777,7 @@ function init() {
   tickMessages();
   tickStats();
   tickDiag();
+  tickRelay();
   if (lastNodeDetailsId) loadNodeDetails(lastNodeDetailsId);
   window.setInterval(tickStatus, 2500);
   window.setInterval(tickNodes, 5000);
@@ -1687,5 +1786,6 @@ function init() {
   window.setInterval(tickMessages, 2000);
   window.setInterval(tickStats, 10000);
   window.setInterval(tickDiag, 5000);
+  window.setInterval(tickRelay, 5000);
 }
 document.addEventListener("DOMContentLoaded", init);

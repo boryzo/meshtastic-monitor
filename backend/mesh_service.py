@@ -236,6 +236,96 @@ class MeshService:
     def get_sms_config(self) -> Dict[str, Any]:
         return self._sms.get_config()
 
+    def get_relay_stats(self) -> Dict[str, Any]:
+        relay = self._relay
+        if relay is None:
+            cfg = self._cfg
+            return {
+                "enabled": False,
+                "listenHost": None,
+                "listenPort": None,
+                "upstreamHost": cfg.mesh_host or None,
+                "upstreamPort": cfg.mesh_port,
+                "upstreamConnected": False,
+                "clientCount": 0,
+                "clients": [],
+                "startedAt": None,
+            }
+        try:
+            return relay.get_stats()
+        except Exception:
+            return {
+                "enabled": True,
+                "listenHost": None,
+                "listenPort": None,
+                "upstreamHost": None,
+                "upstreamPort": None,
+                "upstreamConnected": False,
+                "clientCount": 0,
+                "clients": [],
+                "startedAt": None,
+            }
+
+    def update_relay_config(
+        self,
+        *,
+        enabled: Optional[bool] = None,
+        listen_host: Optional[str] = None,
+        listen_port: Optional[int] = None,
+    ) -> None:
+        cfg = self._cfg
+        if enabled is False:
+            if self._relay is not None:
+                try:
+                    self._relay.stop()
+                except Exception:
+                    pass
+                self._relay = None
+            self._connect_host = None
+            self._connect_port = None
+            self._disconnect()
+            return
+
+        host = (listen_host or (self._relay.listen_host if self._relay else "0.0.0.0")).strip()
+        if not host:
+            host = "0.0.0.0"
+        port = (
+            int(listen_port)
+            if listen_port is not None
+            else (self._relay.listen_port if self._relay else 4403)
+        )
+        if port <= 0 or port > 65535:
+            raise ValueError("relayPort must be 1..65535")
+
+        if enabled is None and self._relay is None and listen_host is None and listen_port is None:
+            return
+
+        if not cfg.mesh_host:
+            raise ValueError("meshHost must be configured for relay")
+
+        if self._relay is None:
+            relay = TcpRelay(host, port, cfg.mesh_host, cfg.mesh_port)
+            relay.start()
+            self._relay = relay
+        else:
+            listen_changed = host != self._relay.listen_host or port != self._relay.listen_port
+            if listen_changed:
+                try:
+                    self._relay.stop()
+                except Exception:
+                    pass
+                relay = TcpRelay(host, port, cfg.mesh_host, cfg.mesh_port)
+                relay.start()
+                self._relay = relay
+            else:
+                self._relay.update_upstream(cfg.mesh_host, cfg.mesh_port)
+
+        relay = self._relay
+        if relay is not None:
+            self._connect_host = "127.0.0.1" if relay.listen_host in {"0.0.0.0", "::", ""} else relay.listen_host
+            self._connect_port = relay.listen_port
+            self._disconnect()
+
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         iface = self._get_iface()
         if iface is None:
@@ -719,6 +809,10 @@ class FakeMeshService:
         self._sms_phone = ""
         self._sms_allow_from_ids = ""
         self._sms_allow_types = ""
+        self._relay_enabled = False
+        self._relay_host = "0.0.0.0"
+        self._relay_port = 4403
+        self._relay_clients: List[Dict[str, Any]] = []
 
     def start(self) -> None:  # noqa: D401
         self._connected = True
@@ -767,6 +861,19 @@ class FakeMeshService:
             "allowTypes": self._sms_allow_types or "ALL",
         }
 
+    def get_relay_stats(self) -> Dict[str, Any]:
+        return {
+            "enabled": self._relay_enabled,
+            "listenHost": self._relay_host if self._relay_enabled else None,
+            "listenPort": self._relay_port if self._relay_enabled else None,
+            "upstreamHost": self._cfg.mesh_host or None,
+            "upstreamPort": self._cfg.mesh_port,
+            "upstreamConnected": self._relay_enabled,
+            "clientCount": len(self._relay_clients),
+            "clients": list(self._relay_clients),
+            "startedAt": None,
+        }
+
     def update_sms_config(
         self,
         *,
@@ -789,6 +896,20 @@ class FakeMeshService:
             self._sms_allow_from_ids = str(allow_from_ids or "").strip()
         if allow_types is not None:
             self._sms_allow_types = str(allow_types or "").strip()
+
+    def update_relay_config(
+        self,
+        *,
+        enabled: Optional[bool] = None,
+        listen_host: Optional[str] = None,
+        listen_port: Optional[int] = None,
+    ) -> None:
+        if enabled is not None:
+            self._relay_enabled = bool(enabled)
+        if listen_host is not None:
+            self._relay_host = str(listen_host or "").strip() or "0.0.0.0"
+        if listen_port is not None:
+            self._relay_port = int(listen_port)
 
     def get_radio_snapshot(self) -> Optional[Dict[str, Any]]:
         return dict(self._radio) if isinstance(self._radio, dict) else None

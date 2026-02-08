@@ -50,6 +50,8 @@ class TcpRelay:
 
         self._clients: Set[socket.socket] = set()
         self._clients_lock = threading.Lock()
+        self._client_info: dict[socket.socket, dict] = {}
+        self._started_at: Optional[int] = None
 
         self._stop = threading.Event()
         self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
@@ -74,6 +76,7 @@ class TcpRelay:
         server.settimeout(1.0)
         self._server_socket = server
         self._listen_actual_port = server.getsockname()[1]
+        self._started_at = int(time.time())
 
         logger.info(
             "TCP relay listening on %s:%s (upstream %s:%s)",
@@ -113,6 +116,24 @@ class TcpRelay:
             logger.info("TCP relay upstream updated to %s:%s", host, port)
             self._close_upstream()
 
+    def get_stats(self) -> dict:
+        with self._clients_lock:
+            clients = list(self._client_info.values())
+        with self._upstream_lock:
+            upstream_connected = self._upstream_socket is not None
+        host, port = self._get_upstream_target()
+        return {
+            "enabled": True,
+            "listenHost": self._listen_host,
+            "listenPort": self.listen_port,
+            "upstreamHost": host,
+            "upstreamPort": port,
+            "upstreamConnected": upstream_connected,
+            "clientCount": len(clients),
+            "clients": sorted(clients, key=lambda c: c.get("connectedAt") or 0),
+            "startedAt": self._started_at,
+        }
+
     # ---- internal loops
     def _accept_loop(self) -> None:
         while not self._stop.is_set():
@@ -126,8 +147,18 @@ class TcpRelay:
             except Exception:
                 break
             client.settimeout(1.0)
+            now = int(time.time())
+            addr = _format_addr(_addr)
             with self._clients_lock:
                 self._clients.add(client)
+                self._client_info[client] = {
+                    "addr": addr[0],
+                    "port": addr[1],
+                    "connectedAt": now,
+                    "lastSeen": now,
+                }
+                count = len(self._clients)
+            logger.info("TCP relay client connected %s:%s (clients=%s)", addr[0], addr[1], count)
             t = threading.Thread(target=self._client_loop, args=(client,), daemon=True)
             t.start()
 
@@ -168,6 +199,7 @@ class TcpRelay:
                 data = client.recv(self._read_buf)
                 if not data:
                     break
+                self._touch_client(client)
                 self._send_upstream(data)
             except socket.timeout:
                 continue
@@ -200,18 +232,30 @@ class TcpRelay:
                 self._remove_client(client)
 
     def _remove_client(self, client: socket.socket) -> None:
+        info = None
+        count = 0
         with self._clients_lock:
             if client in self._clients:
                 self._clients.remove(client)
+            info = self._client_info.pop(client, None)
+            count = len(self._clients)
         try:
             client.close()
         except Exception:
             pass
+        if info:
+            logger.info(
+                "TCP relay client disconnected %s:%s (clients=%s)",
+                info.get("addr"),
+                info.get("port"),
+                count,
+            )
 
     def _close_all_clients(self) -> None:
         with self._clients_lock:
             clients = list(self._clients)
             self._clients.clear()
+            self._client_info.clear()
         for client in clients:
             try:
                 client.close()
@@ -227,3 +271,18 @@ class TcpRelay:
                 sock.close()
             except Exception:
                 pass
+
+    def _touch_client(self, client: socket.socket) -> None:
+        now = int(time.time())
+        with self._clients_lock:
+            info = self._client_info.get(client)
+            if info is not None:
+                info["lastSeen"] = now
+
+
+def _format_addr(addr: tuple) -> tuple[str, int]:
+    try:
+        host, port = addr[0], int(addr[1])
+        return str(host), port
+    except Exception:
+        return "unknown", 0
