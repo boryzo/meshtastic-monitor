@@ -96,15 +96,23 @@ class StatsDB:
         limit: int = 200,
         offset: int = 0,
         order: str = "asc",
+        app: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        limit_sql, params = _limit_clause(limit, offset)
+        limit_sql, limit_params = _limit_clause(limit, offset)
         order_dir = _order_dir(order)
+        where: List[str] = []
+        params: List[Any] = []
+        app_val = _to_str_or_none(app)
+        if app_val:
+            where.append("app = ?")
+            params.append(app_val)
+        where_sql = f"WHERE {' AND '.join(where)} " if where else ""
         sql = (
             "SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum, "
             "app, request_id, want_response, text, payload_b64, error "
-            f"FROM messages ORDER BY rx_time {order_dir}, id {order_dir} {limit_sql}"
+            f"FROM messages {where_sql}ORDER BY rx_time {order_dir}, id {order_dir} {limit_sql}"
         )
-        rows = self._fetchall(sql, params)
+        rows = self._fetchall(sql, tuple(params) + limit_params)
         return [{"rxTime": r["rx_time"], "fromId": r["from_id"], "toId": r["to_id"], "snr": r["snr"], "rssi": r["rssi"], "hopLimit": r["hop_limit"], "channel": r["channel"], "portnum": r["portnum"], "app": r["app"], "requestId": r["request_id"], "wantResponse": _bool_from_int(r["want_response"]), "text": r["text"], "payload_b64": r["payload_b64"], "error": r["error"]} for r in rows]
     def record_send(self, ok: bool, error: Optional[str] = None) -> None:
         with self._lock, self._conn:

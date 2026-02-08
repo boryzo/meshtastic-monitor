@@ -15,6 +15,8 @@ from backend.jsonsafe import node_entry, now_epoch, radio_entry
 from backend.mesh_service import MeshService
 from backend.stats_db import StatsDB
 from backend.config_store import resolve_config_path, update_config
+
+TEXT_MESSAGE_APP = "TEXT_MESSAGE_APP"
 def _get_env_int(name: str, default: int) -> int:
     return _parse_int(os.getenv(name), default)
 def _parse_int(value: Optional[str], default: int) -> int:
@@ -309,11 +311,18 @@ def create_app(
         # Newest last (chronological) by default
         if stats_db is not None and hasattr(stats_db, "list_messages"):
             try:
-                return jsonify(stats_db.list_messages(limit=limit, offset=offset, order=order))
+                return jsonify(
+                    stats_db.list_messages(
+                        limit=limit,
+                        offset=offset,
+                        order=order,
+                        app=TEXT_MESSAGE_APP,
+                    )
+                )
             except Exception:
                 pass
         # Fallback to in-memory messages
-        msgs = mesh_service.get_messages()
+        msgs = [m for m in mesh_service.get_messages() if m.get("app") == TEXT_MESSAGE_APP]
         if limit > 0:
             if order and str(order).lower() == "desc":
                 msgs = list(reversed(msgs))

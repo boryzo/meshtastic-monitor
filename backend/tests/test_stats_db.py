@@ -274,6 +274,39 @@ def test_stats_db_list_messages_order_and_offset():
     assert [m["rxTime"] for m in desc] == [3, 2]
 
 
+def test_stats_db_list_messages_app_filter():
+    db = StatsDB(":memory:")
+    db.record_message(
+        {
+            "rxTime": 1,
+            "fromId": "!n1",
+            "toId": "!x",
+            "snr": 1,
+            "rssi": -90,
+            "app": "TEXT_MESSAGE_APP",
+            "text": "hello",
+            "payload_b64": None,
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 2,
+            "fromId": "!n2",
+            "toId": "!x",
+            "snr": 1,
+            "rssi": -90,
+            "app": "POSITION_APP",
+            "text": "pos",
+            "payload_b64": None,
+        }
+    )
+
+    msgs = db.list_messages(limit=10, order="asc", app="TEXT_MESSAGE_APP")
+    assert len(msgs) == 1
+    assert msgs[0]["text"] == "hello"
+    assert msgs[0]["app"] == "TEXT_MESSAGE_APP"
+
+
 def test_stats_db_node_history_records_quality():
     db = StatsDB(":memory:")
     now = FIXED_NOW

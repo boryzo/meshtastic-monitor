@@ -39,7 +39,8 @@ def client():
                 "rssi": -100,
                 "hopLimit": 3,
                 "channel": 0,
-                "portnum": "POSITION_APP",
+                "portnum": "TEXT_MESSAGE_APP",
+                "app": "TEXT_MESSAGE_APP",
                 "text": "hi",
                 "payload_b64": None,
             }
@@ -64,7 +65,8 @@ def client():
             "rssi": -100,
             "hopLimit": 3,
             "channel": 0,
-            "portnum": "POSITION_APP",
+            "portnum": "TEXT_MESSAGE_APP",
+            "app": "TEXT_MESSAGE_APP",
             "text": "hi",
             "payload_b64": None,
         }
@@ -354,7 +356,8 @@ def test_messages_pagination_and_order():
                 "toId": "!x",
                 "snr": 1,
                 "rssi": -100,
-                "portnum": "POSITION_APP",
+                "portnum": "TEXT_MESSAGE_APP",
+                "app": "TEXT_MESSAGE_APP",
                 "text": f"m{rx}",
                 "payload_b64": None,
             }
@@ -375,8 +378,8 @@ def test_messages_fallback_when_stats_disabled():
     svc.start()
     svc.seed_messages(
         [
-            {"rxTime": 1, "fromId": "!a", "toId": "!b", "text": "hi"},
-            {"rxTime": 2, "fromId": "!c", "toId": "!d", "text": "yo"},
+            {"rxTime": 1, "fromId": "!a", "toId": "!b", "text": "hi", "app": "TEXT_MESSAGE_APP"},
+            {"rxTime": 2, "fromId": "!c", "toId": "!d", "text": "yo", "app": "TEXT_MESSAGE_APP"},
         ]
     )
     app = create_app(mesh_service=svc, stats_db=None)
@@ -387,6 +390,44 @@ def test_messages_fallback_when_stats_disabled():
     assert len(body) == 2
     assert body[0]["text"] == "hi"
     assert body[1]["text"] == "yo"
+
+
+def test_messages_filters_non_text_app():
+    svc = FakeMeshService()
+    svc.start()
+    db = StatsDB(":memory:")
+    db.record_message(
+        {
+            "rxTime": 1,
+            "fromId": "!a",
+            "toId": "!b",
+            "snr": -1,
+            "rssi": -100,
+            "app": "TEXT_MESSAGE_APP",
+            "text": "hello",
+            "payload_b64": None,
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 2,
+            "fromId": "!c",
+            "toId": "!d",
+            "snr": -2,
+            "rssi": -101,
+            "app": "POSITION_APP",
+            "text": "pos",
+            "payload_b64": None,
+        }
+    )
+    app = create_app(mesh_service=svc, stats_db=db)
+    app.testing = True
+    c = app.test_client()
+
+    body = c.get("/api/messages?order=asc").get_json()
+    assert len(body) == 1
+    assert body[0]["text"] == "hello"
+    assert body[0]["app"] == "TEXT_MESSAGE_APP"
 
 def test_stats_ok(client):
     res = client.get("/api/stats")
