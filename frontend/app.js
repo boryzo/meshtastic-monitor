@@ -876,26 +876,24 @@ function setMainTab(tab) {
 function updateMessageChannelTabs(channels) {
   const container = $("messageChannelTabs");
   if (!container) return;
-  const items = [{ id: "all", label: "All" }];
-  const seen = new Set();
-  if (Array.isArray(channels)) {
-    for (const ch of channels) {
-      if (typeof ch.index !== "number") continue;
-      const id = String(ch.index);
-      items.push({ id, label: formatChannelIndexLabel(ch.index, ch) });
-      seen.add(id);
-    }
-  }
-  for (const id of getObservedChannelIds(lastMessages)) {
-    if (seen.has(id)) continue;
-    items.push({ id, label: formatChannelHashLabel(id) });
-  }
+  const observed = getObservedChannelIds(lastMessages);
+  const items = computeMessageChannelTabItems(
+    observed,
+    channelsByIndex,
+    formatChannelIndexLabel,
+    formatChannelHashLabel
+  );
   container.innerHTML = items
     .map(
       (it) =>
         `<button class="tab" data-msg-channel="${escapeHtml(it.id)}">${escapeHtml(it.label)}</button>`
     )
     .join("");
+  const ids = new Set(items.map((it) => String(it.id)));
+  if (!ids.has(String(activeMessageChannel || "all"))) {
+    activeMessageChannel = "all";
+    if (lastMessages) renderMessages(lastMessages);
+  }
   const selected = String(activeMessageChannel || "all");
   container.querySelectorAll("[data-msg-channel]").forEach((btn) => {
     const isActive = btn.getAttribute("data-msg-channel") === selected;
