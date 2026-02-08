@@ -48,11 +48,37 @@ _PL_MAP = {
     "Ź": "Z",
 }
 
+_EMOJI_MAP = {
+    "😀": " SMILE ",
+    "😁": " GRIN ",
+    "😂": " LAUGH ",
+    "🤣": " ROFL ",
+    "😊": " BLUSH ",
+    "😍": " LOVE ",
+    "😘": " KISS ",
+    "😢": " SAD ",
+    "😭": " CRY ",
+    "😡": " ANGRY ",
+    "👍": " OK ",
+    "👎": " NO ",
+    "🙏": " PRAY ",
+    "👏": " CLAP ",
+    "💪": " STRONG ",
+    "🎉": " PARTY ",
+    "❤️": " HEART ",
+    "❤": " HEART ",
+    "🔥": " FIRE ",
+    "😎": " COOL ",
+    "🤔": " THINK ",
+}
+
 
 def _gsm7_normalize(text: str) -> str:
     if not text:
         return ""
     out = text
+    for src, dst in _EMOJI_MAP.items():
+        out = out.replace(src, dst)
     for src, dst in _PL_MAP.items():
         out = out.replace(src, dst)
     out = out.replace("→", "->")

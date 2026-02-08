@@ -252,6 +252,17 @@ def test_sms_relay_strips_caret_and_keeps_url_punctuation():
     assert "#CjQK123" in formatted
 
 
+def test_sms_relay_replaces_common_emojis():
+    relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
+    msg = {"fromId": "!a", "toId": "!b", "text": "😀👍❤️🔥🤔"}
+    formatted = relay._format_message(msg)
+    assert "SMILE" in formatted
+    assert "OK" in formatted
+    assert "HEART" in formatted
+    assert "FIRE" in formatted
+    assert "THINK" in formatted
+
+
 def test_sms_relay_skips_when_no_text(monkeypatch):
     called = {"ok": False}
 
