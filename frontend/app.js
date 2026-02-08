@@ -47,6 +47,19 @@ function fmtTime(epoch) {
   const d = new Date(epoch * 1000);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
+function fmtMessageTime(epoch) {
+  if (!epoch) return "—";
+  const d = new Date(epoch * 1000);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (sameDay) return time;
+  const date = d.toLocaleDateString();
+  return `${date} ${time}`;
+}
 let activeNodesTab = "direct";
 let lastMessagesKey = "";
 let lastStatus = null;
@@ -259,7 +272,21 @@ function renderMessages(messages) {
   const key = JSON.stringify([
     channelsVersion,
     selected,
-    filtered.map((m) => [m.rxTime, m.fromId, m.toId, m.text, m.portnum, m.channel, m.app, m.requestId, m.wantResponse]),
+    filtered.map((m) => [
+      m.rxTime,
+      m.fromId,
+      m.toId,
+      m.fromShort,
+      m.fromLong,
+      m.toShort,
+      m.toLong,
+      m.text,
+      m.portnum,
+      m.channel,
+      m.app,
+      m.requestId,
+      m.wantResponse,
+    ]),
   ]);
   if (key === lastMessagesKey) return;
   lastMessagesKey = key;
@@ -269,8 +296,8 @@ function renderMessages(messages) {
   }
   const rows = [];
   for (const m of filtered) {
-    const from = m.fromId || "—";
-    const to = m.toId || "—";
+    const from = messageNodeLabel(m, "from");
+    const to = messageNodeLabel(m, "to");
     const snr = m.snr === null || m.snr === undefined ? "—" : String(m.snr);
     const rssi = m.rssi === null || m.rssi === undefined ? "—" : String(m.rssi);
     const chNum = m.channel === null || m.channel === undefined ? null : Number(m.channel);
@@ -286,7 +313,7 @@ function renderMessages(messages) {
     rows.push(`
       <div class="msg ${direction}">
         <div class="meta">
-          <span>${escapeHtml(fmtTime(m.rxTime))}</span>
+          <span>${escapeHtml(fmtMessageTime(m.rxTime))}</span>
           <span class="mono">${escapeHtml(from)} → ${escapeHtml(to)}</span>
           <span>SNR ${escapeHtml(snr)} / RSSI ${escapeHtml(rssi)}</span>
           ${channelBadge}
@@ -550,6 +577,35 @@ function isAppRequestForMe(m, appName) {
   return m.toId === localRadioId;
 }
 let lastNodes = null;
+function getNodeNameById(nodeId) {
+  if (!nodeId || !lastNodes) return {};
+  const list = []
+    .concat(lastNodes.direct || [])
+    .concat(lastNodes.relayed || []);
+  const match = list.find((n) => String(n.id || "") === String(nodeId));
+  return match ? { short: match.short, long: match.long } : {};
+}
+function formatNodeLabel(shortName, longName, fallbackId) {
+  const short = shortName ? String(shortName).trim() : "";
+  const long = longName ? String(longName).trim() : "";
+  if (short && long && long !== short) return `${short} - ${long}`;
+  if (short) return short;
+  if (long) return long;
+  return fallbackId || "—";
+}
+function messageNodeLabel(m, side) {
+  const id = side === "to" ? m.toId : m.fromId;
+  const shortKey = side === "to" ? "toShort" : "fromShort";
+  const longKey = side === "to" ? "toLong" : "fromLong";
+  let shortName = m[shortKey];
+  let longName = m[longKey];
+  if (!shortName && !longName) {
+    const lookup = getNodeNameById(id);
+    shortName = lookup.short;
+    longName = lookup.long;
+  }
+  return formatNodeLabel(shortName, longName, id || "—");
+}
 async function tickNodes() {
   try {
     const n = await apiFetch("/api/nodes");
@@ -692,8 +748,8 @@ function renderNodeMessages(nodeId) {
     return;
   }
   const rows = filtered.map((m) => {
-    const from = m.fromId || "—";
-    const to = m.toId || "—";
+    const from = messageNodeLabel(m, "from");
+    const to = messageNodeLabel(m, "to");
     const snr = m.snr === null || m.snr === undefined ? "—" : String(m.snr);
     const rssi = m.rssi === null || m.rssi === undefined ? "—" : String(m.rssi);
     const text = m.text
@@ -703,7 +759,7 @@ function renderNodeMessages(nodeId) {
     return `
       <div class="msg ${direction}">
         <div class="meta">
-          <span>${escapeHtml(fmtTime(m.rxTime))}</span>
+          <span>${escapeHtml(fmtMessageTime(m.rxTime))}</span>
           <span class="mono">${escapeHtml(from)} → ${escapeHtml(to)}</span>
           <span>SNR ${escapeHtml(snr)} / RSSI ${escapeHtml(rssi)}</span>
         </div>

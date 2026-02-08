@@ -429,6 +429,38 @@ def test_messages_filters_non_text_app():
     assert body[0]["text"] == "hello"
     assert body[0]["app"] == "TEXT_MESSAGE_APP"
 
+
+def test_messages_include_node_names_when_known():
+    svc = FakeMeshService()
+    svc.start()
+    db = StatsDB(":memory:")
+    db.record_nodes_snapshot(
+        {
+            "!n1": {"user": {"shortName": "S1", "longName": "Node One"}},
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 1,
+            "fromId": "!n1",
+            "toId": "!n2",
+            "snr": 1,
+            "rssi": -90,
+            "app": "TEXT_MESSAGE_APP",
+            "text": "hi",
+            "payload_b64": None,
+        }
+    )
+    app = create_app(mesh_service=svc, stats_db=db)
+    app.testing = True
+    c = app.test_client()
+
+    msg = c.get("/api/messages").get_json()[0]
+    assert msg["fromShort"] == "S1"
+    assert msg["fromLong"] == "Node One"
+    assert msg["toShort"] is None
+    assert msg["toLong"] is None
+
 def test_stats_ok(client):
     res = client.get("/api/stats")
     assert res.status_code == 200

@@ -307,6 +307,34 @@ def test_stats_db_list_messages_app_filter():
     assert msgs[0]["app"] == "TEXT_MESSAGE_APP"
 
 
+def test_stats_db_list_messages_includes_node_names():
+    db = StatsDB(":memory:")
+    db.record_nodes_snapshot(
+        {
+            "!n1": {"user": {"shortName": "S1", "longName": "Node One"}},
+            "!n2": {"user": {"shortName": "S2", "longName": "Node Two"}},
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 1,
+            "fromId": "!n1",
+            "toId": "!n2",
+            "snr": 1,
+            "rssi": -90,
+            "app": "TEXT_MESSAGE_APP",
+            "text": "hello",
+            "payload_b64": None,
+        }
+    )
+
+    msg = db.list_messages(limit=1, order="asc")[0]
+    assert msg["fromShort"] == "S1"
+    assert msg["fromLong"] == "Node One"
+    assert msg["toShort"] == "S2"
+    assert msg["toLong"] == "Node Two"
+
+
 def test_stats_db_node_history_records_quality():
     db = StatsDB(":memory:")
     now = FIXED_NOW

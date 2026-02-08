@@ -108,12 +108,16 @@ class StatsDB:
             params.append(app_val)
         where_sql = f"WHERE {' AND '.join(where)} " if where else ""
         sql = (
-            "SELECT rx_time, from_id, to_id, snr, rssi, hop_limit, channel, portnum, "
-            "app, request_id, want_response, text, payload_b64, error "
-            f"FROM messages {where_sql}ORDER BY rx_time {order_dir}, id {order_dir} {limit_sql}"
+            "SELECT m.rx_time, m.from_id, m.to_id, m.snr, m.rssi, m.hop_limit, m.channel, m.portnum, "
+            "m.app, m.request_id, m.want_response, m.text, m.payload_b64, m.error, "
+            "nf.short AS from_short, nf.long AS from_long, nt.short AS to_short, nt.long AS to_long "
+            "FROM messages m "
+            "LEFT JOIN node_counts nf ON nf.node_id = m.from_id "
+            "LEFT JOIN node_counts nt ON nt.node_id = m.to_id "
+            f"{where_sql}ORDER BY m.rx_time {order_dir}, m.id {order_dir} {limit_sql}"
         )
         rows = self._fetchall(sql, tuple(params) + limit_params)
-        return [{"rxTime": r["rx_time"], "fromId": r["from_id"], "toId": r["to_id"], "snr": r["snr"], "rssi": r["rssi"], "hopLimit": r["hop_limit"], "channel": r["channel"], "portnum": r["portnum"], "app": r["app"], "requestId": r["request_id"], "wantResponse": _bool_from_int(r["want_response"]), "text": r["text"], "payload_b64": r["payload_b64"], "error": r["error"]} for r in rows]
+        return [{"rxTime": r["rx_time"], "fromId": r["from_id"], "toId": r["to_id"], "snr": r["snr"], "rssi": r["rssi"], "hopLimit": r["hop_limit"], "channel": r["channel"], "portnum": r["portnum"], "app": r["app"], "requestId": r["request_id"], "wantResponse": _bool_from_int(r["want_response"]), "text": r["text"], "payload_b64": r["payload_b64"], "error": r["error"], "fromShort": r["from_short"], "fromLong": r["from_long"], "toShort": r["to_short"], "toLong": r["to_long"]} for r in rows]
     def record_send(self, ok: bool, error: Optional[str] = None) -> None:
         with self._lock, self._conn:
             self._incr_counter("send_total", 1)
