@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.jsonsafe import json_safe_packet, now_epoch
+from backend.tcp_relay import TcpRelay
 from backend.sms_relay import SmsRelay
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class MeshService:
         mesh_host: str,
         mesh_port: int = 4403,
         *,
+        connect_host: Optional[str] = None,
+        connect_port: Optional[int] = None,
+        relay: Optional[TcpRelay] = None,
         nodes_refresh_sec: int = 5,
         max_messages: int = 200,
         stats_db: Optional[Any] = None,
@@ -80,6 +84,9 @@ class MeshService:
             mesh_host=mesh_host,
             mesh_port=mesh_port_int,
         )
+        self._connect_host = (connect_host or "").strip() or None
+        self._connect_port = int(connect_port) if connect_port is not None else None
+        self._relay = relay
         self._nodes_refresh_sec = max(1, int(nodes_refresh_sec))
         self._max_messages = max(1, int(max_messages))
         self._stats_db = stats_db
@@ -138,6 +145,12 @@ class MeshService:
         self._stop.set()
         self._thread.join(timeout=timeout)
         self._disconnect()
+        relay = self._relay
+        if relay is not None:
+            try:
+                relay.stop()
+            except Exception:
+                pass
 
     # ---- config
     def get_config(self) -> MeshConfig:
@@ -178,6 +191,12 @@ class MeshService:
             mesh_host=next_mesh_host,
             mesh_port=next_mesh_port,
         )
+        relay = self._relay
+        if relay is not None:
+            try:
+                relay.update_upstream(next_mesh_host, next_mesh_port)
+            except Exception:
+                pass
 
         if changed:
             logger.info(
@@ -424,6 +443,10 @@ class MeshService:
 
     def _target_str(self) -> str:
         cfg = self._cfg
+        host = self._connect_host or cfg.mesh_host
+        port = self._connect_port or cfg.mesh_port
+        if host != cfg.mesh_host or port != cfg.mesh_port:
+            return f"tcp {host}:{port} (via relay)"
         return f"tcp {cfg.mesh_host}:{cfg.mesh_port}"
 
     def _connect(self) -> Any:
@@ -447,11 +470,13 @@ class MeshService:
 
             logger.info("Connecting to mesh (%s)", self._target_str())
             cfg = self._cfg
+            host = self._connect_host or cfg.mesh_host
+            port = self._connect_port or cfg.mesh_port
             try:
-                iface = TCPInterface(hostname=cfg.mesh_host, portNumber=cfg.mesh_port)
+                iface = TCPInterface(hostname=host, portNumber=port)
             except TypeError:
                 # Older meshtastic versions may not accept portNumber
-                iface = TCPInterface(hostname=cfg.mesh_host)
+                iface = TCPInterface(hostname=host)
 
             self._iface = iface
             return iface

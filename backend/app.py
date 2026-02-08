@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional, Tuple
 from flask import Flask, Response, jsonify, request
 from backend.jsonsafe import node_entry, now_epoch, radio_entry
 from backend.mesh_service import MeshService
+from backend.tcp_relay import TcpRelay
 from backend.stats_db import StatsDB
 from backend.config_store import resolve_config_path, update_config
 
@@ -133,6 +134,28 @@ def create_app(
         mesh_port = _get_env_int("MESH_PORT", 4403)
         nodes_refresh_sec = _get_env_int("NODES_REFRESH_SEC", 5)
         max_messages = _get_env_int("MAX_MESSAGES", 200)
+        relay_enabled = _parse_bool_env(os.getenv("RELAY_ENABLED"), False)
+        relay_host = os.getenv("RELAY_HOST", "0.0.0.0").strip() or "0.0.0.0"
+        relay_port = _get_env_int("RELAY_PORT", 4403)
+        relay: Optional[TcpRelay] = None
+        connect_host: Optional[str] = None
+        connect_port: Optional[int] = None
+        if relay_enabled:
+            if not mesh_host:
+                logging.warning("Relay enabled but mesh host is not configured; relay disabled")
+            else:
+                try:
+                    relay = TcpRelay(
+                        relay_host,
+                        relay_port,
+                        mesh_host,
+                        mesh_port,
+                    )
+                    relay.start()
+                    connect_host = "127.0.0.1" if relay_host in {"0.0.0.0", "::", ""} else relay_host
+                    connect_port = relay.listen_port
+                except Exception as e:
+                    logging.warning("Failed to start TCP relay: %s", e)
         if stats_db is None:
             stats_path = os.getenv("STATS_DB_PATH", "meshmon.db").strip()
             if stats_path.lower() not in {"", "off", "none", "disabled"}:
@@ -146,6 +169,9 @@ def create_app(
         mesh_service = MeshService(
             mesh_host,
             mesh_port,
+            connect_host=connect_host,
+            connect_port=connect_port,
+            relay=relay,
             nodes_refresh_sec=nodes_refresh_sec,
             max_messages=max_messages,
             stats_db=stats_db,

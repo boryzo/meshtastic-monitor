@@ -48,7 +48,7 @@ On first run, a config file is created in the current folder:
 
 - `./meshmon.ini`
 
-This file stores your **mesh host/port** and optional **SMS relay** settings.
+This file stores your **mesh host/port**, optional **TCP relay**, and **SMS relay** settings.
 You can also choose a custom path:
 
 ```bash
@@ -82,6 +82,18 @@ You can also apply allow-list filters:
 - **Allowed Types** (comma-separated or `ALL`)
   - Types can be `TEXT`, app names (e.g. `POSITION_APP`), or port numbers (e.g. `5`)
 
+### TCP relay (optional)
+
+If you want **more than one TCP client**, enable the relay.
+The app will keep a single connection to your radio and expose a TCP port for other clients:
+
+- Enable **TCP relay**
+- Listen host: `0.0.0.0` (default)
+- Listen port: `4403` (default)
+
+Other clients should then connect to your app machine on `RELAY_HOST:RELAY_PORT`
+instead of connecting directly to the radio.
+
 ## Command-line options (copy/paste)
 
 Show all options:
@@ -105,6 +117,9 @@ Most used:
 - `--sms-phone`
 - `--sms-allow-from` (comma-separated sender IDs or `ALL`)
 - `--sms-allow-types` (comma-separated types or `ALL`)
+- `--relay-enabled` / `--relay-disabled`
+- `--relay-host` (default `0.0.0.0`)
+- `--relay-port` (default `4403`)
 
 You can also set env vars instead of flags:
 
@@ -129,6 +144,9 @@ You can also set env vars instead of flags:
 - `SMS_ALLOW_FROM_IDS` (comma-separated sender IDs or `ALL`)
 - `SMS_ALLOW_TYPES` (comma-separated types or `ALL`)
 - `SMS_TIMEOUT_SEC` (seconds, default `4`)
+- `RELAY_ENABLED` (`1`/`0`)
+- `RELAY_HOST` (default `0.0.0.0`)
+- `RELAY_PORT` (default `4403`)
 
 ## Logs (where are they?)
 

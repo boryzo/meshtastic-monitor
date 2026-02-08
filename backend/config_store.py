@@ -27,6 +27,11 @@ def default_config() -> Dict[str, Dict[str, str]]:
         "http": {
             "port": "8880",
         },
+        "relay": {
+            "enabled": "false",
+            "listen_host": "0.0.0.0",
+            "listen_port": "4403",
+        },
         "sms": {
             "enabled": "false",
             "api_url": DEFAULT_SMS_API_URL,

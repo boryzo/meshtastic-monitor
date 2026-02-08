@@ -128,6 +128,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--sms-api-url", dest="sms_api_url", help="SMS API base URL")
     parser.add_argument("--sms-api-key", dest="sms_api_key", help="SMS API key")
     parser.add_argument("--sms-phone", dest="sms_phone", help="SMS destination phone")
+    parser.add_argument("--relay-host", dest="relay_host", help="TCP relay listen host (default 0.0.0.0)")
+    parser.add_argument("--relay-port", dest="relay_port", help="TCP relay listen port (default 4403)")
     parser.add_argument(
         "--sms-allow-from",
         dest="sms_allow_from",
@@ -138,9 +140,12 @@ def main(argv: list[str] | None = None) -> None:
         dest="sms_allow_types",
         help="Allowed message types for SMS relay (comma-separated or ALL)",
     )
+    parser.add_argument("--relay-enabled", dest="relay_enabled", action="store_true", help="Enable TCP relay")
+    parser.add_argument("--relay-disabled", dest="relay_enabled", action="store_false", help="Disable TCP relay")
     parser.add_argument("--sms-enabled", dest="sms_enabled", action="store_true", help="Enable SMS relay")
     parser.add_argument("--sms-disabled", dest="sms_enabled", action="store_false", help="Disable SMS relay")
     parser.set_defaults(sms_enabled=None)
+    parser.set_defaults(relay_enabled=None)
     args = parser.parse_args(argv)
 
     _configure_logging(log_level=args.log_level, log_file=args.log_file)
@@ -151,6 +156,9 @@ def main(argv: list[str] | None = None) -> None:
     mesh_host_cfg = get_value(cfg, "mesh", "host", "")
     mesh_port_cfg = get_value(cfg, "mesh", "port", "4403")
     http_port_cfg = get_value(cfg, "http", "port", "8880")
+    relay_enabled_cfg = get_bool(cfg, "relay", "enabled", False)
+    relay_host_cfg = get_value(cfg, "relay", "listen_host", "0.0.0.0")
+    relay_port_cfg = get_value(cfg, "relay", "listen_port", "4403")
     nodes_history_cfg = get_value(cfg, "stats", "nodes_history_interval_sec", "60")
     sms_enabled_cfg = get_bool(cfg, "sms", "enabled", False)
     sms_api_url_cfg = get_value(cfg, "sms", "api_url", DEFAULT_SMS_API_URL)
@@ -166,6 +174,13 @@ def main(argv: list[str] | None = None) -> None:
     nodes_history = _coalesce_str(
         args.nodes_history_interval, os.getenv("NODES_HISTORY_INTERVAL_SEC"), nodes_history_cfg
     ) or "60"
+
+    relay_enabled_env = _parse_bool(os.getenv("RELAY_ENABLED"))
+    relay_enabled = args.relay_enabled if args.relay_enabled is not None else relay_enabled_env
+    if relay_enabled is None:
+        relay_enabled = relay_enabled_cfg
+    relay_host = _coalesce_str(args.relay_host, os.getenv("RELAY_HOST"), relay_host_cfg) or "0.0.0.0"
+    relay_port = _coalesce_str(args.relay_port, os.getenv("RELAY_PORT"), relay_port_cfg) or "4403"
 
     sms_enabled_env = _parse_bool(os.getenv("SMS_ENABLED"))
     sms_enabled = args.sms_enabled if args.sms_enabled is not None else sms_enabled_env
@@ -185,6 +200,9 @@ def main(argv: list[str] | None = None) -> None:
     os.environ["MESH_PORT"] = str(mesh_port)
     os.environ["HTTP_PORT"] = str(http_port)
     os.environ["NODES_HISTORY_INTERVAL_SEC"] = str(nodes_history)
+    os.environ["RELAY_ENABLED"] = "1" if relay_enabled else "0"
+    os.environ["RELAY_HOST"] = str(relay_host)
+    os.environ["RELAY_PORT"] = str(relay_port)
     os.environ["MESHMON_CONFIG"] = str(config_path)
     os.environ["SMS_ENABLED"] = "1" if sms_enabled else "0"
     os.environ["SMS_API_URL"] = str(sms_api_url or "")
@@ -200,6 +218,11 @@ def main(argv: list[str] | None = None) -> None:
         {
             "mesh": {"host": mesh_host, "port": str(mesh_port)},
             "http": {"port": str(http_port)},
+            "relay": {
+                "enabled": "true" if relay_enabled else "false",
+                "listen_host": relay_host,
+                "listen_port": str(relay_port),
+            },
             "stats": {"nodes_history_interval_sec": str(nodes_history)},
             "sms": {
                 "enabled": "true" if sms_enabled else "false",
