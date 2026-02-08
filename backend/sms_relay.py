@@ -63,7 +63,7 @@ def _gsm7_sanitize(text: str) -> str:
     if not text:
         return ""
     normalized = _gsm7_normalize(text)
-    return "".join(ch for ch in normalized if ch in _GSM7_BASIC or ch in _GSM7_EXTENDED)
+    return "".join(ch for ch in normalized if ch in _GSM7_BASIC)
 
 
 class SmsRelay:

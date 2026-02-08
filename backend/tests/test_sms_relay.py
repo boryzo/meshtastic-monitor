@@ -222,10 +222,10 @@ def test_sms_relay_gsm7_sanitize_removes_non_gsm7():
     assert "ń" not in sanitized
     assert "😀" not in sanitized
     assert "→" not in sanitized
-    assert "€" in sanitized
+    assert "€" not in sanitized
     assert "Zazolc" in sanitized
     assert all(
-        ch in sms_relay._GSM7_BASIC or ch in sms_relay._GSM7_EXTENDED for ch in sanitized
+        ch in sms_relay._GSM7_BASIC for ch in sanitized
     )
 
 
@@ -236,8 +236,20 @@ def test_sms_relay_format_message_uses_gsm7_only():
     assert "->" in formatted
     assert "😀" not in formatted
     assert "ć" not in formatted
-    assert "€" in formatted
+    assert "€" not in formatted
     assert "Czesc" in formatted
+
+
+def test_sms_relay_strips_caret_and_keeps_url_punctuation():
+    relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
+    msg = {
+        "fromId": "!d45ab1ec",
+        "toId": "^all",
+        "text": "Zapraszamy: https://signal.group/#CjQK123",
+    }
+    formatted = relay._format_message(msg)
+    assert "^" not in formatted
+    assert "#CjQK123" in formatted
 
 
 def test_sms_relay_skips_when_no_text(monkeypatch):
