@@ -18,3 +18,4 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+backend/tests/fixtures/live/

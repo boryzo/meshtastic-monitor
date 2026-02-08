@@ -16,7 +16,7 @@
   "fsFree": 1019904,
   "fsTotal": 1048576,
   "wifiRssi": null,
-  "wifiIp": "192.168.8.137",
+  "wifiIp": "192.0.2.10",
   "radioFrequency": 869.525024414062,
   "loraChannel": 1,
   "rebootCounter": 58

@@ -30,13 +30,13 @@ def test_mesh_service_reconfigure_validates_mesh_port():
 
 
 def test_status_url_ignores_tcp_port_in_host():
-    svc = MeshService("192.168.8.137:4403", 4403, mesh_http_port=80)
-    assert svc._status_url() == "http://192.168.8.137/json/report"
+    svc = MeshService("192.0.2.10:4403", 4403, mesh_http_port=80)
+    assert svc._status_url() == "http://192.0.2.10/json/report"
 
 
 def test_status_url_uses_host_port_when_diff():
-    svc = MeshService("192.168.8.137:8081", 4403, mesh_http_port=80)
-    assert svc._status_url() == "http://192.168.8.137:8081/json/report"
+    svc = MeshService("192.0.2.10:8081", 4403, mesh_http_port=80)
+    assert svc._status_url() == "http://192.0.2.10:8081/json/report"
 
 
 def test_status_fetch_populates_report_and_stats(monkeypatch):
@@ -57,20 +57,20 @@ def test_status_fetch_populates_report_and_stats(monkeypatch):
             return False
 
     def _fake_urlopen(url, timeout=None):  # noqa: ANN001
-        assert url == "http://192.168.8.137/json/report"
+        assert url == "http://192.0.2.10/json/report"
         return _DummyResponse(payload)
 
     monkeypatch.setattr(mesh_service.urllib.request, "urlopen", _fake_urlopen)
 
     db = StatsDB(":memory:", status_history_interval_sec=0)
-    svc = MeshService("192.168.8.137", 4403, mesh_http_port=80, stats_db=db)
+    svc = MeshService("192.0.2.10", 4403, mesh_http_port=80, stats_db=db)
     snap = svc.get_status_snapshot(force=True)
 
     assert snap["ok"] is True
     assert snap["status"] == "ok"
     assert snap["report"]["power"]["battery_percent"] == 99
     assert snap["report"]["wifi"]["ip"] == "192.168.1.10"
-    assert snap["url"] == "http://192.168.8.137/json/report"
+    assert snap["url"] == "http://192.0.2.10/json/report"
 
     items = db.list_status_reports(limit=1, order="asc")
     assert items
