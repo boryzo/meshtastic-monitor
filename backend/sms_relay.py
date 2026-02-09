@@ -232,7 +232,7 @@ class SmsRelay:
                 "message": message,
             }
             logger.info("SMS relay dispatch (msg=%s)", message)
-            
+
             try:
                 # Create SSL context for HTTPS connections with certificate verification
                 ssl_context = ssl.create_default_context()

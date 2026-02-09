@@ -811,9 +811,16 @@ def create_app(
             if not isinstance(sms_phone, str):
                 return jsonify({"ok": False, "error": "smsPhone must be a string"}), 400
             phone = sms_phone.strip()
-            # Basic phone number validation (digits, +, -, spaces, parentheses)
-            if phone and not all(c.isdigit() or c in "+-() " for c in phone):
-                return jsonify({"ok": False, "error": "smsPhone contains invalid characters"}), 400
+            # Phone number validation: must contain at least one digit and only valid chars
+            if phone:
+                if not any(c.isdigit() for c in phone):
+                    return jsonify({"ok": False, "error": "smsPhone must contain at least one digit"}), 400
+                if not all(c.isdigit() or c in "+-() " for c in phone):
+                    return jsonify({"ok": False, "error": "smsPhone contains invalid characters"}), 400
+                # Remove spaces to check structure
+                phone_no_spaces = phone.replace(" ", "")
+                if not phone_no_spaces or phone_no_spaces in ["++", "+-", "-+", "--"]:
+                    return jsonify({"ok": False, "error": "smsPhone has invalid format"}), 400
             sms_kwargs["phone"] = phone
         if sms_allow_from_ids is not None:
             if not isinstance(sms_allow_from_ids, str):

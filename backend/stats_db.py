@@ -470,14 +470,43 @@ class StatsDB:
             "hops_away": "INTEGER",
             "last_heard": "INTEGER",
         }
+        # SQL reserved keywords to prevent conflicts
+        sql_reserved = {
+            "abort", "action", "add", "after", "all", "alter", "analyze", "and", "as",
+            "asc", "attach", "autoincrement", "before", "begin", "between", "by", "cascade",
+            "case", "cast", "check", "collate", "column", "commit", "conflict", "constraint",
+            "create", "cross", "current", "current_date", "current_time", "current_timestamp",
+            "database", "default", "deferrable", "deferred", "delete", "desc", "detach",
+            "distinct", "do", "drop", "each", "else", "end", "escape", "except", "exclude",
+            "exclusive", "exists", "explain", "fail", "filter", "first", "following", "for",
+            "foreign", "from", "full", "glob", "group", "groups", "having", "if", "ignore",
+            "immediate", "in", "index", "indexed", "initially", "inner", "insert", "instead",
+            "intersect", "into", "is", "isnull", "join", "key", "last", "left", "like",
+            "limit", "match", "natural", "no", "not", "nothing", "notnull", "null", "nulls",
+            "of", "offset", "on", "or", "order", "others", "outer", "over", "partition",
+            "plan", "pragma", "preceding", "primary", "query", "raise", "range", "recursive",
+            "references", "regexp", "reindex", "release", "rename", "replace", "restrict",
+            "returning", "right", "rollback", "row", "rows", "savepoint", "select", "set",
+            "table", "temp", "temporary", "then", "ties", "to", "transaction", "trigger",
+            "unbounded", "union", "unique", "update", "using", "vacuum", "values", "view",
+            "virtual", "when", "where", "window", "with", "without",
+        }
         # Whitelist validation to prevent SQL injection in ALTER TABLE statements
         allowed_types = {"TEXT", "INTEGER"}
         for col, ddl in wanted.items():
             if col in existing:
                 continue
-            # Validate column name (alphanumeric and underscore only)
-            if not col.replace("_", "").isalnum():
+            # Validate column name structure
+            if not col or not col.replace("_", "").isalnum():
                 logger.warning("Skipping invalid column name: %s", col)
+                continue
+            # Prevent names starting/ending with underscore or having consecutive underscores
+            if col.startswith("_") or col.endswith("_") or "__" in col:
+                logger.warning("Skipping column name with invalid underscore placement: %s", col)
+                continue
+            # Check against SQL reserved keywords
+            if col.lower() in sql_reserved:
+                logger.warning("Skipping reserved SQL keyword as column name: %s", col)
                 continue
             # Validate DDL type
             if ddl not in allowed_types:
