@@ -166,6 +166,12 @@ class SmsRelay:
     def _format_message(self, msg: Dict[str, Any]) -> str:
         from_id = msg.get("fromId") or "?"
         to_id = msg.get("toId") or "?"
+        from_name = msg.get("fromName")
+        to_name = msg.get("toName")
+        if isinstance(from_name, str) and from_name.strip():
+            from_id = from_name.strip()
+        if isinstance(to_name, str) and to_name.strip():
+            to_id = to_name.strip()
         text = msg.get("text")
         if not isinstance(text, str) or not text.strip():
             return ""

@@ -240,6 +240,19 @@ def test_sms_relay_format_message_uses_gsm7_only():
     assert "Czesc" in formatted
 
 
+def test_sms_relay_uses_long_names_when_available():
+    relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
+    msg = {
+        "fromId": "!a",
+        "toId": "!b",
+        "fromName": "Node Alpha",
+        "toName": "Node Beta",
+        "text": "hello",
+    }
+    formatted = relay._format_message(msg)
+    assert formatted.startswith("Node Alpha->Node Beta:")
+
+
 def test_sms_relay_strips_caret_and_keeps_url_punctuation():
     relay = sms_relay.SmsRelay(enabled=True, api_url="x", api_key="y", phone="z")
     msg = {

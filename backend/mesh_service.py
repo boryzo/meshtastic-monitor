@@ -631,6 +631,28 @@ class MeshService:
         except Exception:
             pass
 
+    def _node_long_name(self, node_id: Any) -> Optional[str]:
+        if not isinstance(node_id, str) or not node_id:
+            return None
+        with self._nodes_lock:
+            node = self._nodes_cache.get(node_id)
+        if not isinstance(node, dict):
+            return None
+        user = node.get("user") or {}
+        if not isinstance(user, dict):
+            return None
+        long_name = user.get("longName") or user.get("long_name")
+        if isinstance(long_name, str):
+            long_name = long_name.strip()
+            if long_name:
+                return long_name
+        short_name = user.get("shortName") or user.get("short_name")
+        if isinstance(short_name, str):
+            short_name = short_name.strip()
+            if short_name:
+                return short_name
+        return None
+
     def _on_receive(self, packet, interface) -> None:  # noqa: ANN001
         self._log_packet_diag(packet)
         try:
@@ -661,7 +683,16 @@ class MeshService:
             except Exception:
                 pass
         try:
-            self._sms.send_message(msg)
+            sms_msg = msg
+            from_name = self._node_long_name(msg.get("fromId"))
+            to_name = self._node_long_name(msg.get("toId"))
+            if from_name or to_name:
+                sms_msg = dict(msg)
+                if from_name:
+                    sms_msg["fromName"] = from_name
+                if to_name:
+                    sms_msg["toName"] = to_name
+            self._sms.send_message(sms_msg)
         except Exception:
             pass
 
