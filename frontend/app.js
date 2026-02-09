@@ -869,14 +869,20 @@ function renderNodesVisibleHistory() {
     el.innerHTML = `<div class="muted">No data</div>`;
     return;
   }
-  const points = nodesHistory.map((p) => {
-    const count = Number(p.meshCount ?? p.total) || 0;
+  const points = nodesHistory.map((p) => ({ ts: p.ts, value: Number(p.meshCount ?? p.total) || 0, meta: p }));
+  const max = Math.max(1, ...points.map((p) => p.value));
+  const bars = points.map((p) => {
+    const count = Number(p.value) || 0;
+    const height = 10 + Math.round((count / max) * 50);
     const label = new Date(p.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const observedAdded = Number(p.observedAdded || 0);
+    const observedAdded = Number(p.meta?.observedAdded || 0);
     const title = observedAdded > 0 ? `${label} • ${count} mesh (+${observedAdded} observed)` : `${label} • ${count} mesh`;
-    return { ts: p.ts, value: count, title };
+    return `<div class="bar" style="height:${height}px" title="${escapeHtml(title)}">
+      <span>${count}</span>
+    </div>`;
   });
-  renderLineChartWithLabels(el, points, 6, { height: 280 });
+  const labels = buildTimeLabels(points, 6);
+  el.innerHTML = `<div class="bars-row">${bars.join("")}</div><div class="bar-labels">${labels}</div>`;
 }
 function setMainTab(tab) {
   const mapped = tab === "messages" ? "channels" : tab;
@@ -1088,56 +1094,6 @@ function buildTimeLabels(points, maxLabels = 6) {
     })
     .join("");
 }
-function buildLineChartSvg(points, opts = {}) {
-  const height = Number(opts.height) || 280;
-  const pad = Number(opts.pad) || 12;
-  if (!Array.isArray(points) || points.length === 0) {
-    return `<div class="muted">No data</div>`;
-  }
-  const values = points.map((p) => p.value).filter((v) => Number.isFinite(v));
-  if (!values.length) {
-    return `<div class="muted">No data</div>`;
-  }
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const width = Math.max(1, points.length - 1);
-  const usableH = Math.max(1, height - pad * 2);
-  const coords = points.map((p, idx) => {
-    const value = Number(p.value);
-    const norm = Number.isFinite(value) ? (value - min) / span : 0;
-    const x = points.length === 1 ? width / 2 : (idx / (points.length - 1)) * width;
-    const y = pad + (1 - norm) * usableH;
-    return { x, y, value, title: p.title || "" };
-  });
-  const linePoints = coords.map((p) => `${p.x},${p.y}`).join(" ");
-  const areaPath = `M ${coords[0].x} ${coords[0].y} L ${coords
-    .map((p) => `${p.x} ${p.y}`)
-    .join(" L ")} L ${coords[coords.length - 1].x} ${height - pad} L ${coords[0].x} ${height - pad} Z`;
-  const circles = coords
-    .map(
-      (p) =>
-        `<circle class="line-point" cx="${p.x}" cy="${p.y}" r="2"><title>${escapeHtml(
-          p.title || ""
-        )}</title></circle>`
-    )
-    .join("");
-  return `<svg class="line-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img">
-    <path class="line-area" d="${areaPath}"></path>
-    <polyline class="line-path" points="${linePoints}"></polyline>
-    ${circles}
-  </svg>`;
-}
-function renderLineChartWithLabels(el, points, maxLabels = 6, opts = {}) {
-  if (!el) return;
-  if (!Array.isArray(points) || points.length === 0) {
-    el.innerHTML = `<div class="muted">No data</div>`;
-    return;
-  }
-  const svg = buildLineChartSvg(points, opts);
-  const labels = buildTimeLabels(points, maxLabels);
-  el.innerHTML = `<div class="line-chart-wrap">${svg}</div><div class="bar-labels">${labels}</div>`;
-}
 function renderBars(hourly) {
   const el = $("statsHourly");
   if (!el) return;
@@ -1145,18 +1101,24 @@ function renderBars(hourly) {
     el.innerHTML = `<div class="muted">No data</div>`;
     return;
   }
-  const points = hourly.map((h) => {
+  const points = hourly.map((h) => ({ ts: Number(h.hour) || 0, value: Number(h.messages) || 0 }));
+  const max = Math.max(1, ...hourly.map((h) => Number(h.messages) || 0));
+  const bars = hourly.map((h) => {
     const count = Number(h.messages) || 0;
     const withText = Number(h.with_text ?? h.withText ?? h.with_text) || 0;
     const withPayload = Number(h.with_payload ?? h.withPayload ?? h.with_payload) || 0;
+    const height = 10 + Math.round((count / max) * 50);
     const label = new Date((Number(h.hour) || 0) * 1000).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
     const title = `${label} • ${count} msgs (${withText} text, ${withPayload} payload)`;
-    return { ts: Number(h.hour) || 0, value: count, title };
+    return `<div class="bar" style="height:${height}px" title="${escapeHtml(title)}">
+      <span>${count}</span>
+    </div>`;
   });
-  renderLineChartWithLabels(el, points, 8, { height: 280 });
+  const labels = buildTimeLabels(points, 8);
+  el.innerHTML = `<div class="bars-row">${bars.join("")}</div><div class="bar-labels">${labels}</div>`;
 }
 function renderSeriesBars(elId, series, valueKey, formatLabel) {
   const el = $(elId);
@@ -1168,15 +1130,28 @@ function renderSeriesBars(elId, series, valueKey, formatLabel) {
   const points = series
     .map((s) => {
       const v = Number(s[valueKey]);
-      const value = Number.isFinite(v) ? v : null;
-      return { ts: s.ts, value, title: value === null ? "" : formatLabel(value) };
+      return { ts: s.ts, value: Number.isFinite(v) ? v : null };
     })
     .filter((p) => p.value !== null);
   if (!points.length) {
     el.innerHTML = `<div class="muted">No data</div>`;
     return;
   }
-  renderLineChartWithLabels(el, points, 8, { height: 280 });
+  const min = Math.min(...points.map((p) => p.value));
+  const max = Math.max(...points.map((p) => p.value));
+  const span = max - min || 1;
+  const bars = points.map((p) => {
+    const norm = (p.value - min) / span;
+    const height = 10 + Math.round(norm * 50);
+    const label = p.ts ? new Date(p.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    const valueLabel = formatLabel(p.value);
+    const title = `${label} • ${valueLabel}`;
+    return `<div class="bar" style="height:${height}px" title="${escapeHtml(title)}">
+      <span>${escapeHtml(valueLabel)}</span>
+    </div>`;
+  });
+  const labels = buildTimeLabels(points, 8);
+  el.innerHTML = `<div class="bars-row">${bars.join("")}</div><div class="bar-labels">${labels}</div>`;
 }
 function renderStatusSummary(latest) {
   const el = $("statsStatusSummary");
