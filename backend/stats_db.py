@@ -470,9 +470,20 @@ class StatsDB:
             "hops_away": "INTEGER",
             "last_heard": "INTEGER",
         }
+        # Whitelist validation to prevent SQL injection in ALTER TABLE statements
+        allowed_types = {"TEXT", "INTEGER"}
         for col, ddl in wanted.items():
             if col in existing:
                 continue
+            # Validate column name (alphanumeric and underscore only)
+            if not col.replace("_", "").isalnum():
+                logger.warning("Skipping invalid column name: %s", col)
+                continue
+            # Validate DDL type
+            if ddl not in allowed_types:
+                logger.warning("Skipping invalid DDL type for column %s: %s", col, ddl)
+                continue
+            # Safe to use f-string here since col and ddl are validated
             self._conn.execute(f"ALTER TABLE node_counts ADD COLUMN {col} {ddl}")
     def _incr_counter(self, key: str, delta: int) -> None:
         self._conn.execute("INSERT OR IGNORE INTO counters(key, value) VALUES(?, 0)", (key,))

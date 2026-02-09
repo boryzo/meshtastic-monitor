@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
+import ssl
 import threading
 import time
 import urllib.error
@@ -223,17 +225,25 @@ class SmsRelay:
             if not api_url or not api_key or not phone:
                 return
 
-            params = {
+            # Use POST with JSON body instead of GET with query params to protect API key
+            payload = {
                 "api_key": api_key,
                 "phone": phone,
                 "message": message,
             }
             logger.info("SMS relay dispatch (msg=%s)", message)
-            qs = urllib.parse.urlencode(params, doseq=False, safe="")
-            url = api_url + ("&" if "?" in api_url else "?") + qs
-
+            
             try:
-                with urllib.request.urlopen(url, timeout=timeout) as resp:
+                # Create SSL context for HTTPS connections with certificate verification
+                ssl_context = ssl.create_default_context()
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    api_url,
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as resp:
                     status = getattr(resp, "status", None) or getattr(resp, "code", None)
                     body = resp.read()
                 duration_ms = int((time.time() - start) * 1000)
@@ -246,16 +256,16 @@ class SmsRelay:
                 duration_ms = int((time.time() - start) * 1000)
                 try:
                     body = e.read()
-                except Exception:
+                except (OSError, AttributeError):
                     body = b""
                 snippet = _snippet(body, api_key)
                 if snippet:
                     logger.warning("SMS relay failed (http=%s, ms=%s, resp=%s)", e.code, duration_ms, snippet)
                 else:
                     logger.warning("SMS relay failed (http=%s, ms=%s)", e.code, duration_ms)
-            except Exception as e:
+            except (urllib.error.URLError, OSError, TimeoutError) as e:
                 duration_ms = int((time.time() - start) * 1000)
-                logger.warning("SMS relay failed (%s, ms=%s)", type(e).__name__, duration_ms)
+                logger.warning("SMS relay failed (%s: %s, ms=%s)", type(e).__name__, e, duration_ms)
 
         threading.Thread(target=_send, daemon=True).start()
 
