@@ -956,8 +956,13 @@ async function tickStats() {
       "statsRelay",
       "statsApps",
       "statsAppRequests",
+      "statsRequesters",
       "statsTopFrom",
       "statsTopTo",
+      "statsMostVisible",
+      "statsZeroHop",
+      "statsSnr",
+      "statsFlaky",
       "statsEvents",
     ].forEach(
       (id) => {
@@ -1164,10 +1169,13 @@ function renderStats(data) {
       "statsRelay",
       "statsApps",
       "statsAppRequests",
+      "statsRequesters",
       "statsTopFrom",
       "statsTopTo",
       "statsMostVisible",
       "statsZeroHop",
+      "statsSnr",
+      "statsFlaky",
       "statsEvents",
       "statsStatusSummary",
       "statsBattery",
@@ -1265,6 +1273,19 @@ function renderStats(data) {
     "No requests recorded"
   );
   renderList(
+    "statsRequesters",
+    apps.requesters || [],
+    (r) => {
+      const last = r.lastTs ? fmtTime(r.lastTs) : "—";
+      return `<div class="list-row">
+        <div>${nodeLabelHtml(r)}</div>
+        <div>${fmtCount(r.count)} req</div>
+        <div class="muted">${escapeHtml(last)}</div>
+      </div>`;
+    },
+    "No requesters recorded"
+  );
+  renderList(
     "statsTopFrom",
     nodes.topFrom || [],
     (n) =>
@@ -1292,10 +1313,15 @@ function renderStats(data) {
     (n) => {
       const seconds = n.seconds ?? null;
       const timeLabel = seconds ? fmtAge(seconds) : "—";
+      const pct =
+        n.availabilityPct !== null && n.availabilityPct !== undefined
+          ? `${n.availabilityPct}%`
+          : null;
+      const meta = [timeLabel, pct].filter(Boolean).join(" • ");
       return `<div class="list-row">
         <div>${nodeLabelHtml(n)}</div>
         <div>${fmtCount(n.snapshots)} snaps</div>
-        <div class="muted">${escapeHtml(timeLabel)}</div>
+        <div class="muted">${escapeHtml(meta || "—")}</div>
       </div>`;
     },
     "No visibility history"
@@ -1313,6 +1339,31 @@ function renderStats(data) {
       </div>`;
     },
     "No zero-hop history"
+  );
+  renderList(
+    "statsSnr",
+    nodes.snrStats || [],
+    (n) => {
+      const fmt = (val) =>
+        val === null || val === undefined ? "—" : Number(val).toFixed(1);
+      return `<div class="list-row">
+        <div>${nodeLabelHtml(n)}</div>
+        <div>${fmtCount(n.samples)} samples</div>
+        <div class="muted">min ${fmt(n.minSnr)} • avg ${fmt(n.avgSnr)} • max ${fmt(n.maxSnr)}</div>
+      </div>`;
+    },
+    "No SNR history"
+  );
+  renderList(
+    "statsFlaky",
+    nodes.flaky || [],
+    (n) => {
+      return `<div class="list-row">
+        <div>${nodeLabelHtml(n)}</div>
+        <div>${fmtCount(n.hopChanges)} changes</div>
+      </div>`;
+    },
+    "No hop changes"
   );
   renderList(
     "statsEvents",

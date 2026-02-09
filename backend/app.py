@@ -563,12 +563,15 @@ def create_app(
                 "apps": {
                     "counts": summary.app_counts,
                     "requestsToMe": summary.app_requests_to_me,
+                    "requesters": summary.app_requesters,
                 },
                 "nodes": {
                     "topFrom": summary.top_from,
                     "topTo": summary.top_to,
                     "mostVisible": summary.nodes_visible,
                     "zeroHop": summary.nodes_zero_hops,
+                    "snrStats": summary.nodes_snr_stats,
+                    "flaky": summary.nodes_flaky,
                     "windowDays": summary.nodes_window_days,
                     "historyIntervalSec": summary.nodes_history_interval_sec,
                 },

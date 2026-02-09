@@ -471,9 +471,12 @@ def test_stats_ok(client):
     assert "apps" in body
     assert "counts" in body["apps"]
     assert "requestsToMe" in body["apps"]
+    assert "requesters" in body["apps"]
     assert "nodes" in body
     assert "mostVisible" in body["nodes"]
     assert "zeroHop" in body["nodes"]
+    assert "snrStats" in body["nodes"]
+    assert "flaky" in body["nodes"]
     assert "windowDays" in body["nodes"]
     assert "historyIntervalSec" in body["nodes"]
 

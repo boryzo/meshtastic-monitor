@@ -29,9 +29,12 @@ class StatsSummary:
     nodes_history_interval_sec: int
     nodes_visible: List[Dict[str, Any]]
     nodes_zero_hops: List[Dict[str, Any]]
+    nodes_snr_stats: List[Dict[str, Any]]
+    nodes_flaky: List[Dict[str, Any]]
     recent_events: List[Dict[str, Any]]
     app_counts: List[Dict[str, Any]]
     app_requests_to_me: List[Dict[str, Any]]
+    app_requesters: List[Dict[str, Any]]
 class StatsDB:
     """Very small SQLite-backed stats store (thread-safe single connection)."""
     def __init__(
@@ -362,17 +365,21 @@ class StatsDB:
         since_window = now - hours * 3600
         since_1h = now - 1 * 3600
         since_nodes = now - nodes_days * 86400
+        window_seconds = max(0, now - since_nodes)
         with self._lock:
             counters = self._get_counters()
             hourly_window = self._get_hourly(since_window)
             hourly_1 = self._get_hourly(since_1h)
             top_from = self._get_top(kind="from", limit=top_limit)
             top_to = self._get_top(kind="to", limit=top_limit)
-            nodes_visible = self._get_node_visibility(since_nodes, limit=top_limit)
+            nodes_visible = self._get_node_visibility(since_nodes, window_seconds, limit=top_limit)
             nodes_zero_hops = self._get_node_zero_hops(since_nodes, limit=top_limit)
+            nodes_snr_stats = self._get_node_snr_stats(since_nodes, limit=top_limit)
+            nodes_flaky = self._get_node_flaky(since_nodes, limit=top_limit)
             events = self._get_events(limit=event_limit)
             app_counts = self._get_app_counts()
             app_requests_to_me = self._get_app_requests_to_me(local_node_id)
+            app_requesters = self._get_top_requesters(since_nodes, limit=top_limit, local_node_id=local_node_id)
         return StatsSummary(
             db_path=self.path,
             window_hours=hours,
@@ -387,9 +394,12 @@ class StatsDB:
             nodes_history_interval_sec=int(self._nodes_history_interval_sec),
             nodes_visible=nodes_visible,
             nodes_zero_hops=nodes_zero_hops,
+            nodes_snr_stats=nodes_snr_stats,
+            nodes_flaky=nodes_flaky,
             recent_events=events,
             app_counts=app_counts,
             app_requests_to_me=app_requests_to_me,
+            app_requesters=app_requesters,
         )
     # ---- internals
     def _connect(self, path: str) -> sqlite3.Connection:
@@ -549,12 +559,23 @@ class StatsDB:
                 continue
             out.append({"id": str(r["node_id"]), "short": r["short"], "long": r["long"], "count": count, "lastRx": r["last_rx"], "lastSnr": r["last_snr"], "lastRssi": r["last_rssi"]})
         return out
+    def _expected_snapshots(self, window_seconds: int) -> Optional[int]:
+        interval = int(self._nodes_history_interval_sec)
+        if interval <= 0:
+            return None
+        return max(1, int(window_seconds / interval))
+    def _availability_pct(self, count: int, expected: Optional[int]) -> Optional[float]:
+        if expected is None or expected <= 0:
+            return None
+        pct = (float(count) / float(expected)) * 100.0
+        return min(100.0, round(pct, 1))
     def _node_history_seconds(self, count: int) -> Optional[int]:
         interval = int(self._nodes_history_interval_sec)
         if interval <= 0:
             return None
         return int(count) * interval
-    def _get_node_visibility(self, since_epoch: int, *, limit: int) -> List[Dict[str, Any]]:
+    def _get_node_visibility(self, since_epoch: int, window_seconds: int, *, limit: int) -> List[Dict[str, Any]]:
+        expected = self._expected_snapshots(window_seconds)
         rows = self._conn.execute(
             "SELECT nh.node_id, COUNT(*) AS cnt, nc.short, nc.long "
             "FROM node_history nh "
@@ -577,6 +598,8 @@ class StatsDB:
                     "long": r["long"],
                     "snapshots": count,
                     "seconds": self._node_history_seconds(count),
+                    "expectedSnapshots": expected,
+                    "availabilityPct": self._availability_pct(count, expected),
                 }
             )
         return out
@@ -603,6 +626,73 @@ class StatsDB:
                     "long": r["long"],
                     "snapshots": count,
                     "seconds": self._node_history_seconds(count),
+                }
+            )
+        return out
+    def _get_node_snr_stats(self, since_epoch: int, *, limit: int) -> List[Dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT nh.node_id, MIN(nh.snr) AS min_snr, AVG(nh.snr) AS avg_snr, "
+            "MAX(nh.snr) AS max_snr, COUNT(nh.snr) AS samples, nc.short, nc.long "
+            "FROM node_history nh "
+            "LEFT JOIN node_counts nc ON nc.node_id = nh.node_id "
+            "WHERE nh.ts >= ? AND nh.snr IS NOT NULL "
+            "GROUP BY nh.node_id "
+            "ORDER BY samples DESC, avg_snr DESC "
+            "LIMIT ?",
+            (int(since_epoch), int(limit)),
+        ).fetchall()
+        return [
+            {
+                "id": str(r["node_id"]),
+                "short": r["short"],
+                "long": r["long"],
+                "minSnr": r["min_snr"],
+                "avgSnr": r["avg_snr"],
+                "maxSnr": r["max_snr"],
+                "samples": int(r["samples"]),
+            }
+            for r in rows
+            if r["samples"] is not None and int(r["samples"]) > 0
+        ]
+    def _get_node_flaky(self, since_epoch: int, *, limit: int) -> List[Dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT node_id, hops_away FROM node_history WHERE ts >= ? ORDER BY node_id, ts, id",
+            (int(since_epoch),),
+        ).fetchall()
+        changes: Dict[str, int] = {}
+        prev: Dict[str, Optional[int]] = {}
+        for r in rows:
+            node_id = str(r["node_id"])
+            hops = r["hops_away"]
+            if hops is None:
+                continue
+            try:
+                hops_val = int(hops)
+            except Exception:
+                continue
+            last = prev.get(node_id)
+            if last is not None and hops_val != last:
+                changes[node_id] = changes.get(node_id, 0) + 1
+            prev[node_id] = hops_val
+        if not changes:
+            return []
+        ids = list(changes.keys())
+        placeholders = ",".join("?" for _ in ids)
+        names: Dict[str, Dict[str, Any]] = {}
+        for r in self._conn.execute(
+            f"SELECT node_id, short, long FROM node_counts WHERE node_id IN ({placeholders})",
+            tuple(ids),
+        ).fetchall():
+            names[str(r["node_id"])] = {"short": r["short"], "long": r["long"]}
+        out = []
+        for node_id, count in sorted(changes.items(), key=lambda kv: kv[1], reverse=True)[: int(limit)]:
+            info = names.get(node_id, {})
+            out.append(
+                {
+                    "id": node_id,
+                    "short": info.get("short"),
+                    "long": info.get("long"),
+                    "hopChanges": int(count),
                 }
             )
         return out
@@ -635,3 +725,32 @@ class StatsDB:
                 continue
             out.append({"app": str(r["app"]), "fromId": from_id, "toId": str(r["to_id"]), "count": int(r["count"]), "lastTs": int(r["last_ts"])})
         return out
+    def _get_top_requesters(
+        self, since_epoch: int, *, limit: int, local_node_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        params: List[Any] = [int(since_epoch)]
+        where = "m.rx_time >= ? AND m.from_id IS NOT NULL AND (m.request_id IS NOT NULL OR m.want_response = 1)"
+        if isinstance(local_node_id, str) and local_node_id.strip():
+            where += " AND m.from_id != ?"
+            params.append(local_node_id.strip())
+        rows = self._conn.execute(
+            "SELECT m.from_id, COUNT(*) AS cnt, MAX(m.rx_time) AS last_ts, nc.short, nc.long "
+            "FROM messages m "
+            "LEFT JOIN node_counts nc ON nc.node_id = m.from_id "
+            f"WHERE {where} "
+            "GROUP BY m.from_id "
+            "ORDER BY cnt DESC, last_ts DESC "
+            "LIMIT ?",
+            tuple(params + [int(limit)]),
+        ).fetchall()
+        return [
+            {
+                "id": str(r["from_id"]),
+                "short": r["short"],
+                "long": r["long"],
+                "count": int(r["cnt"]),
+                "lastTs": int(r["last_ts"]) if r["last_ts"] is not None else None,
+            }
+            for r in rows
+            if r["cnt"] is not None and int(r["cnt"]) > 0
+        ]

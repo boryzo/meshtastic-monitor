@@ -238,6 +238,97 @@ def test_stats_db_node_visibility_and_zero_hops(monkeypatch):
     assert zero["!b"]["seconds"] == 60
 
 
+def test_stats_db_node_snr_flaky_and_requesters(monkeypatch):
+    times = iter([100, 160, 220, 280, 340])
+    last = 100
+
+    def _next():  # noqa: ANN001
+        nonlocal last
+        try:
+            last = next(times)
+        except StopIteration:
+            pass
+        return last
+
+    monkeypatch.setattr(stats_db, "now_epoch", _next)
+    db = StatsDB(":memory:", nodes_history_interval_sec=60)
+
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A"}, "snr": 1.0, "hopsAway": 0},
+            "!b": {"user": {"shortName": "B"}, "snr": -2.0, "hopsAway": 1},
+        }
+    )
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A"}, "snr": 2.0, "hopsAway": 1},
+            "!b": {"user": {"shortName": "B"}, "snr": -1.0, "hopsAway": 1},
+        }
+    )
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A"}, "snr": 0.0, "hopsAway": 0},
+            "!b": {"user": {"shortName": "B"}, "snr": -1.0, "hopsAway": 2},
+        }
+    )
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A"}, "snr": 1.0, "hopsAway": 0},
+            "!b": {"user": {"shortName": "B"}, "snr": -3.0, "hopsAway": 2},
+        }
+    )
+
+    db.record_message(
+        {
+            "rxTime": 500,
+            "fromId": "!req1",
+            "toId": "^all",
+            "requestId": 1,
+            "app": "POSITION_APP",
+            "portnum": "POSITION_APP",
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 510,
+            "fromId": "!req1",
+            "toId": "^all",
+            "wantResponse": True,
+            "app": "NODEINFO_APP",
+            "portnum": "NODEINFO_APP",
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 520,
+            "fromId": "!req2",
+            "toId": "!me",
+            "requestId": 2,
+            "app": "TELEMETRY_APP",
+            "portnum": "TELEMETRY_APP",
+        }
+    )
+
+    summary = db.summary(nodes_days=7)
+
+    snr_stats = {s["id"]: s for s in summary.nodes_snr_stats}
+    assert snr_stats["!a"]["samples"] == 4
+    assert snr_stats["!a"]["minSnr"] == 0.0
+    assert snr_stats["!a"]["maxSnr"] == 2.0
+    assert snr_stats["!a"]["avgSnr"] == pytest.approx(1.0)
+    assert snr_stats["!b"]["samples"] == 4
+    assert snr_stats["!b"]["minSnr"] == -3.0
+    assert snr_stats["!b"]["maxSnr"] == -1.0
+
+    flaky = {f["id"]: f for f in summary.nodes_flaky}
+    assert flaky["!a"]["hopChanges"] == 2
+    assert flaky["!b"]["hopChanges"] == 1
+
+    requesters = {r["id"]: r for r in summary.app_requesters}
+    assert requesters["!req1"]["count"] == 2
+    assert requesters["!req2"]["count"] == 1
+
+
 def test_stats_db_get_node_stats():
     db = StatsDB(":memory:")
     now = FIXED_NOW
