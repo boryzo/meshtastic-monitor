@@ -467,7 +467,7 @@ class MeshService:
             return None, None, f"HTTP {e.code}"
         except urllib.error.URLError as e:
             return None, None, f"URL error: {e.reason}"
-        except (OSError, TimeoutError) as e:
+        except OSError as e:
             return None, None, f"Network error: {type(e).__name__}: {e}"
         try:
             decoded = json.loads(payload.decode("utf-8", errors="ignore"))

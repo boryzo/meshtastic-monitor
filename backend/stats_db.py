@@ -496,8 +496,8 @@ class StatsDB:
         for col, ddl in wanted.items():
             if col in existing:
                 continue
-            # Validate column name structure
-            if not col or not col.replace("_", "").isalnum():
+            # Validate column name structure (alphanumeric and underscores only)
+            if not col or not all(c.isalnum() or c == "_" for c in col):
                 logger.warning("Skipping invalid column name: %s", col)
                 continue
             # Prevent names starting/ending with underscore or having consecutive underscores
@@ -512,7 +512,8 @@ class StatsDB:
             if ddl not in allowed_types:
                 logger.warning("Skipping invalid DDL type for column %s: %s", col, ddl)
                 continue
-            # Safe to use f-string here since col and ddl are validated
+            # f-string required here as SQLite does not support parameterized DDL statements
+            # col and ddl are validated above to prevent SQL injection
             self._conn.execute(f"ALTER TABLE node_counts ADD COLUMN {col} {ddl}")
     def _incr_counter(self, key: str, delta: int) -> None:
         self._conn.execute("INSERT OR IGNORE INTO counters(key, value) VALUES(?, 0)", (key,))

@@ -263,7 +263,7 @@ class SmsRelay:
                     logger.warning("SMS relay failed (http=%s, ms=%s, resp=%s)", e.code, duration_ms, snippet)
                 else:
                     logger.warning("SMS relay failed (http=%s, ms=%s)", e.code, duration_ms)
-            except (urllib.error.URLError, OSError, TimeoutError) as e:
+            except (urllib.error.URLError, OSError) as e:
                 duration_ms = int((time.time() - start) * 1000)
                 logger.warning("SMS relay failed (%s: %s, ms=%s)", type(e).__name__, e, duration_ms)
 
