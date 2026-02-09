@@ -571,12 +571,20 @@ textarea.input {
 }
 .bars {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.bars-row {
+  display: flex;
   align-items: flex-end;
   gap: 6px;
   min-height: 70px;
+  min-width: max-content;
 }
 .bar {
-  width: 14px;
+  width: 30px;
   border-radius: 6px 6px 3px 3px;
   background: linear-gradient(180deg, rgba(79, 140, 255, 0.95), rgba(79, 140, 255, 0.35));
   display: flex;
@@ -587,6 +595,27 @@ textarea.input {
 .bar span {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.8);
+}
+.bar-labels {
+  display: flex;
+  gap: 6px;
+  min-width: max-content;
+}
+.bar-label {
+  width: 30px;
+  text-align: center;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.1;
+}
+.bar-label.empty {
+  color: transparent;
+}
+.bar-label .day {
+  font-size: 9px;
+}
+.bar-label .time {
+  font-size: 9px;
 }
 
 .list {

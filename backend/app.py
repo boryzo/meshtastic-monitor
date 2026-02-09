@@ -8,6 +8,7 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.insert(0, _repo_root)
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from flask import Flask, Response, jsonify, request
@@ -112,6 +113,89 @@ def _default_frontend_path() -> Path:
         return candidate
 
 
+class StatsCache:
+    def __init__(
+        self,
+        *,
+        stats_db: Any,
+        interval_sec: int,
+        hours: int,
+        nodes_days: int,
+        local_id_fn: Optional[Any] = None,
+    ) -> None:
+        self._stats_db = stats_db
+        self._interval_sec = max(1, int(interval_sec))
+        self._hours = max(1, int(hours))
+        self._nodes_days = max(1, int(nodes_days))
+        self._local_id_fn = local_id_fn
+        self._lock = threading.Lock()
+        self._summary = None
+        self._status_latest = None
+        self._status_series: list[Dict[str, Any]] = []
+        self._last_error: Optional[str] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop = threading.Event()
+        self._wake = threading.Event()
+
+    def start(self) -> None:
+        self.refresh()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            if self._wake.wait(self._interval_sec):
+                self._wake.clear()
+                if self._stop.is_set():
+                    return
+            self.refresh()
+
+    def refresh(self) -> None:
+        try:
+            local_id = None
+            if callable(self._local_id_fn):
+                try:
+                    local_id = self._local_id_fn()
+                except Exception:
+                    local_id = None
+            summary = self._stats_db.summary(
+                hours=self._hours,
+                nodes_days=self._nodes_days,
+                local_node_id=local_id,
+            )
+            status_series = []
+            status_latest = None
+            try:
+                status_series = self._stats_db.list_status_reports(limit=120, order="asc")
+                if status_series:
+                    status_latest = status_series[-1]
+            except Exception:
+                status_series = []
+            with self._lock:
+                self._summary = summary
+                self._status_latest = status_latest
+                self._status_series = status_series
+                self._last_error = None
+        except Exception as e:
+            logging.getLogger("meshtastic_monitor.stats").warning("Stats refresh failed: %s", e)
+            with self._lock:
+                self._last_error = f"{type(e).__name__}: {e}"
+
+    def get_snapshot(self) -> Tuple[Any, Any, list[Dict[str, Any]], Optional[str]]:
+        with self._lock:
+            return self._summary, self._status_latest, list(self._status_series), self._last_error
+
+    def update_interval_minutes(self, minutes: int) -> None:
+        minutes = int(minutes)
+        if minutes < 1:
+            raise ValueError("statsCacheMinutes must be >= 1")
+        self._interval_sec = minutes * 60
+        self._wake.set()
+
+    def interval_minutes(self) -> int:
+        return max(1, int(self._interval_sec // 60))
+
+
 def create_app(
     *,
     mesh_service: Optional[Any] = None,
@@ -192,6 +276,27 @@ def create_app(
                 setattr(mesh_service, "_stats_db", stats_db)
         except Exception:
             pass
+    stats_cache = None
+    if stats_db is not None:
+        stats_cache_minutes = _get_env_int("STATS_CACHE_MINUTES", 30)
+
+        def _get_local_id() -> Optional[str]:
+            getter = getattr(mesh_service, "get_radio_snapshot", None)
+            if callable(getter):
+                try:
+                    return _local_node_id(getter())
+                except Exception:
+                    return None
+            return None
+
+        stats_cache = StatsCache(
+            stats_db=stats_db,
+            interval_sec=max(1, stats_cache_minutes) * 60,
+            hours=_get_env_int("STATS_WINDOW_HOURS", 24),
+            nodes_days=_get_env_int("STATS_NODES_DAYS", 7),
+            local_id_fn=_get_local_id,
+        )
+        stats_cache.start()
     # --- frontend routes
     @app.get("/")
     def index() -> Response:
@@ -237,6 +342,11 @@ def create_app(
                     relay_cfg["listenPort"] = result.get("listenPort")
             except Exception:
                 pass
+        stats_cfg = {
+            "cacheMinutes": stats_cache.interval_minutes()
+            if stats_cache is not None
+            else _get_env_int("STATS_CACHE_MINUTES", 30),
+        }
         cfg_path = os.getenv("MESHMON_CONFIG", "").strip() or None
         return jsonify(
             {
@@ -246,6 +356,7 @@ def create_app(
                 "meshPort": cfg.mesh_port,
                 "sms": sms_cfg,
                 "relay": relay_cfg,
+                "stats": stats_cfg,
                 "configPath": cfg_path,
                 "generatedAt": now_epoch(),
             }
@@ -523,26 +634,46 @@ def create_app(
     def api_stats():
         if stats_db is None:
             return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()})
+        summary = None
+        status_latest = None
+        status_series = []
+        if stats_cache is not None:
+            summary, status_latest, status_series, _ = stats_cache.get_snapshot()
+            if summary is None:
+                stats_cache.refresh()
+                summary, status_latest, status_series, _ = stats_cache.get_snapshot()
+        if summary is None:
+            hours = _get_env_int("STATS_WINDOW_HOURS", 24)
+            nodes_days = _get_env_int("STATS_NODES_DAYS", 7)
+            local_id = None
+            getter = getattr(mesh_service, "get_radio_snapshot", None)
+            if callable(getter):
+                try:
+                    local_id = _local_node_id(getter())
+                except Exception:
+                    local_id = None
+            summary = stats_db.summary(hours=hours, nodes_days=nodes_days, local_node_id=local_id)
         hours = _get_env_int("STATS_WINDOW_HOURS", 24)
-        nodes_days = _get_env_int("STATS_NODES_DAYS", 7)
-        local_id = None
-        getter = getattr(mesh_service, "get_radio_snapshot", None)
+        messages_last_hour = summary.messages_last_hour
+        messages_window = summary.messages_window
+        hourly_window = summary.hourly_window
+        getter = getattr(stats_db, "get_message_window", None)
         if callable(getter):
             try:
-                local_id = _local_node_id(getter())
+                msg_window = getter(hours=hours)
+                messages_last_hour = int(msg_window.get("lastHour") or 0)
+                messages_window = int(msg_window.get("window") or 0)
+                hourly_window = msg_window.get("hourlyWindow") or []
             except Exception:
-                local_id = None
-        summary = stats_db.summary(hours=hours, nodes_days=nodes_days, local_node_id=local_id)
+                pass
         cfg = mesh_service.get_config()
         configured = _is_configured(cfg)
-        status_series = []
-        status_latest = None
         try:
             status_series = stats_db.list_status_reports(limit=120, order="asc")
-            if status_series:
-                status_latest = status_series[-1]
+            status_latest = status_series[-1] if status_series else None
         except Exception:
             status_series = []
+            status_latest = None
         return jsonify(
             {
                 "ok": True,
@@ -555,10 +686,10 @@ def create_app(
                 "lastError": mesh_service.last_error(),
                 "counters": summary.counters,
                 "messages": {
-                    "lastHour": summary.messages_last_hour,
+                    "lastHour": messages_last_hour,
                     "windowHours": summary.window_hours,
-                    "window": summary.messages_window,
-                    "hourlyWindow": summary.hourly_window,
+                    "window": messages_window,
+                    "hourlyWindow": hourly_window,
                 },
                 "apps": {
                     "counts": summary.app_counts,
@@ -611,10 +742,14 @@ def create_app(
                     pass
             if stats_db is not None:
                 stats_db.record_send(ok=True)
+                if stats_cache is not None:
+                    stats_cache.refresh()
             return jsonify({"ok": True})
         except Exception as e:
             if stats_db is not None:
                 stats_db.record_send(ok=False, error=f"{type(e).__name__}: {e}")
+                if stats_cache is not None:
+                    stats_cache.refresh()
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
     @app.post("/api/config")
     def api_config():
@@ -633,9 +768,11 @@ def create_app(
         relay_enabled = body.get("relayEnabled")
         relay_host = body.get("relayHost")
         relay_port = body.get("relayPort")
+        stats_cache_minutes = body.get("statsCacheMinutes")
         kwargs: Dict[str, Any] = {}
         sms_kwargs: Dict[str, Any] = {}
         relay_kwargs: Dict[str, Any] = {}
+        stats_kwargs: Dict[str, Any] = {}
         if mesh_host is not None:
             if not isinstance(mesh_host, str) or not mesh_host.strip():
                 return jsonify({"ok": False, "error": "meshHost must be a non-empty string"}), 400
@@ -687,7 +824,15 @@ def create_app(
             if relay_port_val <= 0 or relay_port_val > 65535:
                 return jsonify({"ok": False, "error": "relayPort must be 1..65535"}), 400
             relay_kwargs["listen_port"] = relay_port_val
-        if not kwargs and not sms_kwargs and not relay_kwargs:
+        if stats_cache_minutes is not None:
+            try:
+                stats_cache_val = int(stats_cache_minutes)
+            except Exception:
+                return jsonify({"ok": False, "error": "statsCacheMinutes must be an int"}), 400
+            if stats_cache_val < 1:
+                return jsonify({"ok": False, "error": "statsCacheMinutes must be >= 1"}), 400
+            stats_kwargs["stats_cache_minutes"] = stats_cache_val
+        if not kwargs and not sms_kwargs and not relay_kwargs and not stats_kwargs:
             return jsonify({"ok": False, "error": "no config fields provided"}), 400
         try:
             if kwargs:
@@ -700,6 +845,9 @@ def create_app(
                 updater = getattr(mesh_service, "update_relay_config", None)
                 if callable(updater):
                     updater(**relay_kwargs)
+            if stats_kwargs and stats_cache is not None:
+                stats_cache.update_interval_minutes(int(stats_kwargs["stats_cache_minutes"]))
+                os.environ["STATS_CACHE_MINUTES"] = str(stats_kwargs["stats_cache_minutes"])
             config_path_raw = os.getenv("MESHMON_CONFIG", "").strip()
             if config_path_raw:
                 updates: Dict[str, Dict[str, Any]] = {}
@@ -730,6 +878,8 @@ def create_app(
                     if "listen_port" in relay_kwargs:
                         relay_updates["listen_port"] = str(relay_kwargs["listen_port"])
                     updates["relay"] = relay_updates
+                if stats_kwargs:
+                    updates["stats"] = {"stats_cache_minutes": str(stats_kwargs["stats_cache_minutes"])}
                 if updates:
                     update_config(resolve_config_path(config_path_raw), updates)
             return jsonify({"ok": True})

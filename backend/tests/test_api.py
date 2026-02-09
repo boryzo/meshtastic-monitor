@@ -568,6 +568,7 @@ def test_config_get_includes_sms_defaults(client):
     assert body["relay"]["enabled"] is False
     assert body["relay"]["listenHost"] in {None, "0.0.0.0"}
     assert body["relay"]["listenPort"] in {None, 4403}
+    assert body["stats"]["cacheMinutes"] == 30
 
 
 def test_config_updates_sms_settings():
@@ -618,6 +619,20 @@ def test_config_updates_relay_settings():
     assert relay["listenHost"] == "0.0.0.0"
     assert relay["listenPort"] == 4404
 
+
+def test_config_updates_stats_cache_minutes():
+    svc = FakeMeshService()
+    svc.start()
+    app = create_app(mesh_service=svc, stats_db=StatsDB(":memory:"))
+    app.testing = True
+    c = app.test_client()
+
+    res = c.post("/api/config", json={"statsCacheMinutes": 15})
+    assert res.status_code == 200
+
+    body = c.get("/api/config").get_json()
+    assert body["stats"]["cacheMinutes"] == 15
+
 def test_relay_status_endpoint():
     svc = FakeMeshService()
     svc.start()
@@ -647,3 +662,6 @@ def test_config_rejects_bad_types_and_values(client):
 
     res2 = client.post("/api/config", json={"meshPort": "abc"})
     assert res2.status_code == 400
+
+    res3 = client.post("/api/config", json={"statsCacheMinutes": "abc"})
+    assert res3.status_code == 400

@@ -11,6 +11,7 @@ const LS = {
   relayEnabled: "meshmon.relayEnabled",
   relayHost: "meshmon.relayHost",
   relayPort: "meshmon.relayPort",
+  statsCacheMinutes: "meshmon.statsCacheMinutes",
   sendChannel: "meshmon.sendChannel",
   messagesHistoryLimit: "meshmon.messagesHistoryLimit",
 };
@@ -612,7 +613,7 @@ async function tickNodes() {
   try {
     const n = await apiFetch("/api/nodes");
     lastNodes = n;
-    recordNodesHistory(n.total, n.generatedAt);
+    recordNodesHistory(n, n.generatedAt);
     const ft = $("nodeFilter").value;
     renderNodes(n, ft);
     let src = "";
@@ -823,15 +824,25 @@ function msgPreview(m) {
 function updateTitle() {
   document.title = unreadCount > 0 ? `(${unreadCount}) ${baseTitle}` : baseTitle;
 }
-function recordNodesHistory(total, generatedAt) {
+function recordNodesHistory(nodes, generatedAt) {
   const t = typeof generatedAt === "number" ? generatedAt : Math.floor(Date.now() / 1000);
-  const count = Number(total);
-  if (!Number.isFinite(count)) return;
+  const total = Number(nodes?.total);
+  const meshCount = Number(nodes?.meshCount ?? nodes?.total);
+  if (!Number.isFinite(meshCount)) return;
+  const observedAdded = Number(nodes?.observedAdded || 0);
+  const observedCount = Number(nodes?.observedCount || 0);
+  const entry = {
+    ts: t,
+    total: Number.isFinite(total) ? total : meshCount,
+    meshCount,
+    observedAdded: Number.isFinite(observedAdded) ? observedAdded : 0,
+    observedCount: Number.isFinite(observedCount) ? observedCount : 0,
+  };
   const last = nodesHistory.length ? nodesHistory[nodesHistory.length - 1] : null;
   if (last && last.ts === t) {
-    last.total = count;
+    Object.assign(last, entry);
   } else {
-    nodesHistory.push({ ts: t, total: count });
+    nodesHistory.push(entry);
   }
   if (nodesHistory.length > 120) {
     nodesHistory = nodesHistory.slice(-120);
@@ -845,17 +856,20 @@ function renderNodesVisibleHistory() {
     el.innerHTML = `<div class="muted">No data</div>`;
     return;
   }
-  const max = Math.max(1, ...nodesHistory.map((p) => Number(p.total) || 0));
-  const bars = nodesHistory.map((p) => {
-    const count = Number(p.total) || 0;
+  const points = nodesHistory.map((p) => ({ ts: p.ts, value: Number(p.meshCount ?? p.total) || 0, meta: p }));
+  const max = Math.max(1, ...points.map((p) => p.value));
+  const bars = points.map((p) => {
+    const count = Number(p.value) || 0;
     const height = 10 + Math.round((count / max) * 50);
     const label = new Date(p.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const title = `${label} • ${count} nodes`;
+    const observedAdded = Number(p.meta?.observedAdded || 0);
+    const title = observedAdded > 0 ? `${label} • ${count} mesh (+${observedAdded} observed)` : `${label} • ${count} mesh`;
     return `<div class="bar" style="height:${height}px" title="${escapeHtml(title)}">
       <span>${count}</span>
     </div>`;
   });
-  el.innerHTML = bars.join("");
+  const labels = buildTimeLabels(points, 6);
+  el.innerHTML = `<div class="bars-row">${bars.join("")}</div><div class="bar-labels">${labels}</div>`;
 }
 function setMainTab(tab) {
   const mapped = tab === "messages" ? "channels" : tab;
@@ -1038,6 +1052,32 @@ function prettyAppName(app) {
   if (app === "TELEMETRY_APP") return "Telemetry";
   return String(app);
 }
+function _timeParts(ts) {
+  if (!ts) return { day: "—", time: "—" };
+  const d = new Date(ts * 1000);
+  return {
+    day: d.toLocaleDateString([], { month: "2-digit", day: "2-digit" }),
+    time: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  };
+}
+function buildTimeLabels(points, maxLabels = 6) {
+  if (!Array.isArray(points) || points.length === 0) return "";
+  const every = Math.max(1, Math.floor(points.length / maxLabels));
+  let lastDay = null;
+  return points
+    .map((p, idx) => {
+      const isEdge = idx === 0 || idx === points.length - 1;
+      const show = isEdge || idx % every === 0;
+      if (!show) return `<div class="bar-label empty"></div>`;
+      const parts = _timeParts(p.ts);
+      const showDay = lastDay !== parts.day;
+      lastDay = parts.day;
+      const dayHtml = showDay ? `<div class="day">${escapeHtml(parts.day)}</div>` : "";
+      const timeHtml = `<div class="time">${escapeHtml(parts.time)}</div>`;
+      return `<div class="bar-label">${dayHtml}${timeHtml}</div>`;
+    })
+    .join("");
+}
 function renderBars(hourly) {
   const el = $("statsHourly");
   if (!el) return;
@@ -1045,6 +1085,7 @@ function renderBars(hourly) {
     el.innerHTML = `<div class="muted">No data</div>`;
     return;
   }
+  const points = hourly.map((h) => ({ ts: Number(h.hour) || 0, value: Number(h.messages) || 0 }));
   const max = Math.max(1, ...hourly.map((h) => Number(h.messages) || 0));
   const bars = hourly.map((h) => {
     const count = Number(h.messages) || 0;
@@ -1060,7 +1101,8 @@ function renderBars(hourly) {
       <span>${count}</span>
     </div>`;
   });
-  el.innerHTML = bars.join("");
+  const labels = buildTimeLabels(points, 8);
+  el.innerHTML = `<div class="bars-row">${bars.join("")}</div><div class="bar-labels">${labels}</div>`;
 }
 function renderSeriesBars(elId, series, valueKey, formatLabel) {
   const el = $(elId);
@@ -1092,7 +1134,8 @@ function renderSeriesBars(elId, series, valueKey, formatLabel) {
       <span>${escapeHtml(valueLabel)}</span>
     </div>`;
   });
-  el.innerHTML = bars.join("");
+  const labels = buildTimeLabels(points, 8);
+  el.innerHTML = `<div class="bars-row">${bars.join("")}</div><div class="bar-labels">${labels}</div>`;
 }
 function renderStatusSummary(latest) {
   const el = $("statsStatusSummary");
@@ -1212,7 +1255,13 @@ function renderStats(data) {
     : "—";
   const windowHours = messages.windowHours || data.windowHours || "—";
   $("statsMeta").textContent = `db ${data.dbPath || "—"} • window ${windowHours}h • updated ${updated}`;
-  const currentNodes = lastNodes ? lastNodes.total : null;
+  const liveNodes =
+    lastNodes && Number.isFinite(Number(lastNodes.meshCount))
+      ? Number(lastNodes.meshCount)
+      : lastNodes
+        ? Number(lastNodes.total)
+        : null;
+  const observedAdded = lastNodes ? Number(lastNodes.observedAdded || 0) : 0;
   const summary = `
     <div class="stat">
       <div class="label">Messages (1h)</div>
@@ -1240,7 +1289,7 @@ function renderStats(data) {
     </div>
     <div class="stat">
       <div class="label">Nodes Visible</div>
-      <div class="value">${fmtNumCompact(currentNodes)}</div>
+      <div class="value">${fmtNumCompact(liveNodes)}${observedAdded > 0 ? ` <span class="muted">+${fmtNumCompact(observedAdded)}</span>` : ""}</div>
     </div>
   `;
   $("statsSummary").innerHTML = summary;
@@ -1478,6 +1527,7 @@ async function openModal() {
   $("smsPhone").value = localStorage.getItem(LS.smsPhone) || "";
   $("smsAllowFromIds").value = localStorage.getItem(LS.smsAllowFromIds) || "";
   $("smsAllowTypes").value = localStorage.getItem(LS.smsAllowTypes) || "";
+  $("statsCacheMinutes").value = localStorage.getItem(LS.statsCacheMinutes) || "30";
   $("smsApiKey").value = "";
   setSmsKeyHint(false);
   try {
@@ -1525,6 +1575,10 @@ async function openModal() {
         localStorage.setItem(LS.relayPort, String(relay.listenPort));
       }
     }
+    if (cfg && cfg.stats && cfg.stats.cacheMinutes) {
+      $("statsCacheMinutes").value = String(cfg.stats.cacheMinutes);
+      localStorage.setItem(LS.statsCacheMinutes, String(cfg.stats.cacheMinutes));
+    }
   } catch {
     // ignore config fetch errors
   }
@@ -1547,6 +1601,7 @@ async function saveSettings() {
   const smsPhone = ($("smsPhone").value || "").trim();
   const smsAllowFromIds = ($("smsAllowFromIds").value || "").trim();
   const smsAllowTypes = ($("smsAllowTypes").value || "").trim();
+  const statsCacheMinutes = ($("statsCacheMinutes").value || "").trim();
   localStorage.setItem(LS.apiBaseUrl, apiBaseUrl);
   localStorage.setItem(LS.meshHost, meshHost);
   localStorage.setItem(LS.meshPort, meshPort);
@@ -1558,12 +1613,21 @@ async function saveSettings() {
   localStorage.setItem(LS.smsPhone, smsPhone);
   localStorage.setItem(LS.smsAllowFromIds, smsAllowFromIds);
   localStorage.setItem(LS.smsAllowTypes, smsAllowTypes);
+  localStorage.setItem(LS.statsCacheMinutes, statsCacheMinutes);
   if (!meshHost) {
     showToast("err", "Meshtastic host is required");
     return;
   }
   if (relayPort && !Number.isFinite(Number(relayPort))) {
     showToast("err", "Relay port must be a number");
+    return;
+  }
+  if (statsCacheMinutes && !Number.isFinite(Number(statsCacheMinutes))) {
+    showToast("err", "Stats cache minutes must be a number");
+    return;
+  }
+  if (statsCacheMinutes && Number(statsCacheMinutes) < 1) {
+    showToast("err", "Stats cache minutes must be >= 1");
     return;
   }
   const body = {};
@@ -1577,6 +1641,7 @@ async function saveSettings() {
   body.smsPhone = smsPhone;
   body.smsAllowFromIds = smsAllowFromIds;
   body.smsAllowTypes = smsAllowTypes;
+  if (statsCacheMinutes) body.statsCacheMinutes = Number(statsCacheMinutes);
   if (smsApiKey) body.smsApiKey = smsApiKey;
   try {
     await apiFetch("/api/config", {

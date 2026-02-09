@@ -42,6 +42,7 @@ def default_config() -> Dict[str, Dict[str, str]]:
         },
         "stats": {
             "nodes_history_interval_sec": "60",
+            "stats_cache_minutes": "30",
         },
     }
 

@@ -328,6 +328,23 @@ class StatsDB:
         )
         rows = self._fetchall(sql, tuple(params))
         return [{"ts": int(r["ts"]), "channelUtilization": r["channel_utilization"], "utilizationTx": r["utilization_tx"], "secondsSinceBoot": r["seconds_since_boot"], "rxLog": r["rx_log"], "txLog": r["tx_log"], "rxAllLog": r["rx_all_log"], "batteryPercent": r["battery_percent"], "batteryVoltageMv": r["battery_voltage_mv"], "isCharging": _bool_from_int(r["is_charging"]), "hasUsb": _bool_from_int(r["has_usb"]), "hasBattery": _bool_from_int(r["has_battery"]), "heapFree": r["heap_free"], "heapTotal": r["heap_total"], "fsFree": r["fs_free"], "fsTotal": r["fs_total"], "wifiRssi": r["wifi_rssi"], "wifiIp": r["wifi_ip"], "radioFrequency": r["radio_frequency"], "loraChannel": r["lora_channel"], "rebootCounter": r["reboot_counter"]} for r in rows]
+
+    def get_message_window(self, *, hours: int = 24) -> Dict[str, Any]:
+        hours = max(1, int(hours))
+        now = now_epoch()
+        since_window = now - hours * 3600
+        since_1h = now - 3600
+        with self._lock:
+            hourly_window = self._get_hourly(since_window)
+            hourly_1 = self._get_hourly(since_1h)
+        messages_last_hour = sum(int(r.get("messages") or 0) for r in hourly_1)
+        messages_window = sum(int(r.get("messages") or 0) for r in hourly_window)
+        return {
+            "windowHours": hours,
+            "lastHour": messages_last_hour,
+            "window": messages_window,
+            "hourlyWindow": hourly_window,
+        }
     def get_node_stats(self, node_id: str) -> Optional[Dict[str, Any]]:
         node_id = str(node_id or "").strip()
         if not node_id:

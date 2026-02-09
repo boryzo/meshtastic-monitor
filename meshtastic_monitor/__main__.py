@@ -125,6 +125,11 @@ def main(argv: list[str] | None = None) -> None:
         dest="nodes_history_interval",
         help="Node history sample interval in seconds (default 60)",
     )
+    parser.add_argument(
+        "--stats-cache-minutes",
+        dest="stats_cache_minutes",
+        help="Stats cache refresh interval in minutes (default 30)",
+    )
     parser.add_argument("--sms-api-url", dest="sms_api_url", help="SMS API base URL")
     parser.add_argument("--sms-api-key", dest="sms_api_key", help="SMS API key")
     parser.add_argument("--sms-phone", dest="sms_phone", help="SMS destination phone")
@@ -160,6 +165,7 @@ def main(argv: list[str] | None = None) -> None:
     relay_host_cfg = get_value(cfg, "relay", "listen_host", "0.0.0.0")
     relay_port_cfg = get_value(cfg, "relay", "listen_port", "4403")
     nodes_history_cfg = get_value(cfg, "stats", "nodes_history_interval_sec", "60")
+    stats_cache_cfg = get_value(cfg, "stats", "stats_cache_minutes", "30")
     sms_enabled_cfg = get_bool(cfg, "sms", "enabled", False)
     sms_api_url_cfg = get_value(cfg, "sms", "api_url", DEFAULT_SMS_API_URL)
     sms_api_key_cfg = get_value(cfg, "sms", "api_key", "")
@@ -174,6 +180,9 @@ def main(argv: list[str] | None = None) -> None:
     nodes_history = _coalesce_str(
         args.nodes_history_interval, os.getenv("NODES_HISTORY_INTERVAL_SEC"), nodes_history_cfg
     ) or "60"
+    stats_cache_minutes = _coalesce_str(
+        args.stats_cache_minutes, os.getenv("STATS_CACHE_MINUTES"), stats_cache_cfg
+    ) or "30"
 
     relay_enabled_env = _parse_bool(os.getenv("RELAY_ENABLED"))
     relay_enabled = args.relay_enabled if args.relay_enabled is not None else relay_enabled_env
@@ -200,6 +209,7 @@ def main(argv: list[str] | None = None) -> None:
     os.environ["MESH_PORT"] = str(mesh_port)
     os.environ["HTTP_PORT"] = str(http_port)
     os.environ["NODES_HISTORY_INTERVAL_SEC"] = str(nodes_history)
+    os.environ["STATS_CACHE_MINUTES"] = str(stats_cache_minutes)
     os.environ["RELAY_ENABLED"] = "1" if relay_enabled else "0"
     os.environ["RELAY_HOST"] = str(relay_host)
     os.environ["RELAY_PORT"] = str(relay_port)
@@ -223,7 +233,10 @@ def main(argv: list[str] | None = None) -> None:
                 "listen_host": relay_host,
                 "listen_port": str(relay_port),
             },
-            "stats": {"nodes_history_interval_sec": str(nodes_history)},
+            "stats": {
+                "nodes_history_interval_sec": str(nodes_history),
+                "stats_cache_minutes": str(stats_cache_minutes),
+            },
             "sms": {
                 "enabled": "true" if sms_enabled else "false",
                 "api_url": sms_api_url,

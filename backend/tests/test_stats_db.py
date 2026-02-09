@@ -141,6 +141,39 @@ def test_stats_db_hourly_buckets_are_rounded_to_hour():
     assert base in hours
 
 
+def test_stats_db_get_message_window(monkeypatch):
+    monkeypatch.setattr(stats_db, "now_epoch", lambda: 9000)
+    db = StatsDB(":memory:")
+    db.record_message(
+        {
+            "rxTime": 3600,
+            "fromId": "!a",
+            "toId": "!b",
+            "snr": 0.0,
+            "rssi": -90,
+            "text": "hi",
+            "payload_b64": None,
+        }
+    )
+    db.record_message(
+        {
+            "rxTime": 7200,
+            "fromId": "!b",
+            "toId": "!a",
+            "snr": 0.0,
+            "rssi": -90,
+            "text": "yo",
+            "payload_b64": None,
+        }
+    )
+    window = db.get_message_window(hours=2)
+    assert window["windowHours"] == 2
+    assert window["lastHour"] == 2
+    assert window["window"] == 2
+    hours = [row["hour"] for row in window["hourlyWindow"]]
+    assert hours == [3600, 7200]
+
+
 def test_stats_db_record_nodes_snapshot_and_known_entries():
     db = StatsDB(":memory:")
     now = FIXED_NOW
