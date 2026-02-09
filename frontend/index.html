@@ -22,7 +22,7 @@
         <button class="btn" data-main-tab="channels">💬 Channels</button>
         <button class="btn" data-main-tab="status">🟢 Status</button>
         <button class="btn" data-main-tab="stats">📊 Stats</button>
-        <button id="btnSettings" class="btn">⚙️ Settings</button>
+        <button class="btn" data-main-tab="settings">⚙️ Settings</button>
       </nav>
     </header>
 
@@ -258,114 +258,111 @@
         </div>
         <div id="diagList" class="list"></div>
       </section>
+
+      <section class="card tab-panel" data-tab="settings">
+        <div class="card-header">
+          <h2>Settings</h2>
+        </div>
+        <div class="settings-body">
+          <div class="field">
+            <label for="apiBaseUrl">API Base URL (optional)</label>
+            <input id="apiBaseUrl" class="input" placeholder="http://localhost:8080" />
+            <div class="hint">Leave blank when using the built-in UI.</div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="meshHostInput">Meshtastic IP / Host</label>
+              <input id="meshHostInput" class="input" placeholder="your-mesh-host" />
+            </div>
+            <div class="field">
+              <label for="meshPortInput">Port</label>
+              <input id="meshPortInput" class="input" placeholder="4403" inputmode="numeric" />
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="field">
+            <label>
+              <input id="relayEnabled" type="checkbox" />
+              Enable TCP relay
+            </label>
+            <div class="hint">Allow multiple TCP clients by relaying through this app.</div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="relayHost">Relay listen host</label>
+              <input id="relayHost" class="input" placeholder="0.0.0.0" />
+            </div>
+            <div class="field">
+              <label for="relayPort">Relay listen port</label>
+              <input id="relayPort" class="input" placeholder="4403" inputmode="numeric" />
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="field">
+            <label>
+              <input id="smsEnabled" type="checkbox" />
+              Enable SMS relay
+            </label>
+            <div class="hint">Forward every received message through the SMS gateway.</div>
+          </div>
+
+          <div class="field">
+            <label for="smsApiUrl">SMS API URL</label>
+            <input id="smsApiUrl" class="input" placeholder="https://your-sms-gateway.example/api" />
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="smsPhone">SMS Phone</label>
+              <input id="smsPhone" class="input" placeholder="600000000" />
+            </div>
+            <div class="field">
+              <label for="smsApiKey">SMS API Key</label>
+              <input id="smsApiKey" class="input" placeholder="••••" type="password" />
+              <div class="hint" id="smsKeyHint">Leave blank to keep existing key.</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="smsAllowFromIds">SMS Allowed From IDs</label>
+              <input id="smsAllowFromIds" class="input" placeholder="ALL or !abcd1234,!beef5678" />
+              <div class="hint">Comma-separated sender IDs or <code>ALL</code>.</div>
+            </div>
+            <div class="field">
+              <label for="smsAllowTypes">SMS Allowed Types</label>
+              <input id="smsAllowTypes" class="input" placeholder="ALL or TEXT,POSITION_APP,5" />
+              <div class="hint">Comma-separated types (TEXT, app names, or port numbers) or <code>ALL</code>.</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="field">
+            <label for="statsCacheMinutes">Stats cache (minutes)</label>
+            <input id="statsCacheMinutes" class="input" placeholder="30" inputmode="numeric" />
+            <div class="hint">Recompute heavy stats on a schedule (default 30 minutes).</div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="row">
+            <button id="btnSaveSettings" class="btn btn-primary" type="button">
+              Save & Apply
+            </button>
+            <button id="btnExportSettings" class="btn btn-secondary" type="button">
+              Export Config
+            </button>
+          </div>
+          <div class="hint">Settings are applied via <code>/api/config</code>.</div>
+        </div>
+      </section>
     </main>
-
-    <!-- Settings modal -->
-    <div id="modalBackdrop" class="backdrop hidden" aria-hidden="true"></div>
-    <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Settings">
-      <div class="modal-header">
-        <h3>Settings</h3>
-        <button id="btnCloseModal" class="btn btn-secondary" type="button">Close</button>
-      </div>
-      <div class="modal-body">
-        <div class="field">
-          <label for="apiBaseUrl">API Base URL (optional)</label>
-          <input id="apiBaseUrl" class="input" placeholder="http://localhost:8080" />
-          <div class="hint">Leave blank when using the built-in UI.</div>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="meshHostInput">Meshtastic IP / Host</label>
-            <input id="meshHostInput" class="input" placeholder="your-mesh-host" />
-          </div>
-          <div class="field">
-            <label for="meshPortInput">Port</label>
-            <input id="meshPortInput" class="input" placeholder="4403" inputmode="numeric" />
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="field">
-          <label>
-            <input id="relayEnabled" type="checkbox" />
-            Enable TCP relay
-          </label>
-          <div class="hint">Allow multiple TCP clients by relaying through this app.</div>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="relayHost">Relay listen host</label>
-            <input id="relayHost" class="input" placeholder="0.0.0.0" />
-          </div>
-          <div class="field">
-            <label for="relayPort">Relay listen port</label>
-            <input id="relayPort" class="input" placeholder="4403" inputmode="numeric" />
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="field">
-          <label>
-            <input id="smsEnabled" type="checkbox" />
-            Enable SMS relay
-          </label>
-          <div class="hint">Forward every received message through the SMS gateway.</div>
-        </div>
-
-        <div class="field">
-          <label for="smsApiUrl">SMS API URL</label>
-          <input id="smsApiUrl" class="input" placeholder="https://your-sms-gateway.example/api" />
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="smsPhone">SMS Phone</label>
-            <input id="smsPhone" class="input" placeholder="600000000" />
-          </div>
-          <div class="field">
-            <label for="smsApiKey">SMS API Key</label>
-            <input id="smsApiKey" class="input" placeholder="••••" type="password" />
-            <div class="hint" id="smsKeyHint">Leave blank to keep existing key.</div>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label for="smsAllowFromIds">SMS Allowed From IDs</label>
-            <input id="smsAllowFromIds" class="input" placeholder="ALL or !abcd1234,!beef5678" />
-            <div class="hint">Comma-separated sender IDs or <code>ALL</code>.</div>
-          </div>
-          <div class="field">
-            <label for="smsAllowTypes">SMS Allowed Types</label>
-            <input id="smsAllowTypes" class="input" placeholder="ALL or TEXT,POSITION_APP,5" />
-            <div class="hint">Comma-separated types (TEXT, app names, or port numbers) or <code>ALL</code>.</div>
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="field">
-          <label for="statsCacheMinutes">Stats cache (minutes)</label>
-          <input id="statsCacheMinutes" class="input" placeholder="30" inputmode="numeric" />
-          <div class="hint">Recompute heavy stats on a schedule (default 30 minutes).</div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <div class="row">
-          <button id="btnSaveSettings" class="btn btn-primary" type="button">
-            Save & Apply
-          </button>
-          <button id="btnExportSettings" class="btn btn-secondary" type="button">
-            Export Config
-          </button>
-        </div>
-        <div class="hint">Settings are applied via <code>/api/config</code>.</div>
-      </div>
-    </div>
 
     <!-- Node details modal -->
     <div id="nodeModalBackdrop" class="backdrop hidden" aria-hidden="true"></div>

@@ -886,6 +886,9 @@ function setMainTab(tab) {
     }
   });
   localStorage.setItem("meshmon.mainTab", mapped);
+  if (mapped === "settings") {
+    loadSettingsPanel();
+  }
 }
 function updateMessageChannelTabs(channels) {
   const container = $("messageChannelTabs");
@@ -1512,10 +1515,7 @@ function setSmsKeyHint(apiKeySet) {
     hint.textContent = "Leave blank to keep existing key.";
   }
 }
-async function openModal() {
-  $("modalBackdrop").classList.remove("hidden");
-  $("modal").classList.remove("hidden");
-  $("modalBackdrop").setAttribute("aria-hidden", "false");
+async function loadSettingsPanel() {
   $("apiBaseUrl").value = localStorage.getItem(LS.apiBaseUrl) || "";
   $("meshHostInput").value = localStorage.getItem(LS.meshHost) || "";
   $("meshPortInput").value = localStorage.getItem(LS.meshPort) || "4403";
@@ -1582,11 +1582,6 @@ async function openModal() {
   } catch {
     // ignore config fetch errors
   }
-}
-function closeModal() {
-  $("modalBackdrop").classList.add("hidden");
-  $("modal").classList.add("hidden");
-  $("modalBackdrop").setAttribute("aria-hidden", "true");
 }
 async function saveSettings() {
   const apiBaseUrl = ($("apiBaseUrl").value || "").trim();
@@ -1659,7 +1654,6 @@ async function saveSettings() {
   } catch (e) {
     showToast("err", `Failed to apply settings: ${e.message}`);
   }
-  closeModal();
 }
 function downloadJson(obj, filename) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
@@ -1859,9 +1853,6 @@ function init() {
       setMessageChannel(id);
     });
   }
-  $("btnSettings").addEventListener("click", openModal);
-  $("btnCloseModal").addEventListener("click", closeModal);
-  $("modalBackdrop").addEventListener("click", closeModal);
   $("btnCloseNodeModal").addEventListener("click", closeNodeModal);
   $("nodeModalBackdrop").addEventListener("click", closeNodeModal);
   $("btnSaveSettings").addEventListener("click", saveSettings);
