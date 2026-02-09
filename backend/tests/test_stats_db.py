@@ -190,6 +190,54 @@ def test_stats_db_record_nodes_snapshot_and_known_entries():
     assert entries2["!n1"]["quality"] == "ok"
 
 
+def test_stats_db_node_visibility_and_zero_hops(monkeypatch):
+    times = iter([100, 200, 300])
+    last = 100
+
+    def _next():  # noqa: ANN001
+        nonlocal last
+        try:
+            last = next(times)
+        except StopIteration:
+            pass
+        return last
+
+    monkeypatch.setattr(stats_db, "now_epoch", _next)
+    db = StatsDB(":memory:", nodes_history_interval_sec=60)
+
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A", "longName": "Alpha"}, "hopsAway": 0},
+            "!b": {"user": {"shortName": "B", "longName": "Beta"}, "hopsAway": 1},
+        }
+    )
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A", "longName": "Alpha"}, "hopsAway": 1},
+            "!b": {"user": {"shortName": "B", "longName": "Beta"}, "hopsAway": 0},
+        }
+    )
+    db.record_nodes_snapshot(
+        {
+            "!a": {"user": {"shortName": "A", "longName": "Alpha"}, "hopsAway": 0},
+        }
+    )
+
+    summary = db.summary(nodes_days=7)
+    visible = {v["id"]: v for v in summary.nodes_visible}
+    zero = {v["id"]: v for v in summary.nodes_zero_hops}
+
+    assert visible["!a"]["snapshots"] == 3
+    assert visible["!a"]["seconds"] == 180
+    assert visible["!b"]["snapshots"] == 2
+    assert visible["!b"]["seconds"] == 120
+
+    assert zero["!a"]["snapshots"] == 2
+    assert zero["!a"]["seconds"] == 120
+    assert zero["!b"]["snapshots"] == 1
+    assert zero["!b"]["seconds"] == 60
+
+
 def test_stats_db_get_node_stats():
     db = StatsDB(":memory:")
     now = FIXED_NOW

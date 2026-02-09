@@ -25,6 +25,10 @@ class StatsSummary:
     hourly_window: List[Dict[str, Any]]
     top_from: List[Dict[str, Any]]
     top_to: List[Dict[str, Any]]
+    nodes_window_days: int
+    nodes_history_interval_sec: int
+    nodes_visible: List[Dict[str, Any]]
+    nodes_zero_hops: List[Dict[str, Any]]
     recent_events: List[Dict[str, Any]]
     app_counts: List[Dict[str, Any]]
     app_requests_to_me: List[Dict[str, Any]]
@@ -348,19 +352,24 @@ class StatsDB:
         top_limit: int = 8,
         event_limit: int = 12,
         local_node_id: Optional[str] = None,
+        nodes_days: int = 7,
     ) -> StatsSummary:
         hours = max(1, int(hours))
         top_limit = max(1, int(top_limit))
         event_limit = max(1, int(event_limit))
+        nodes_days = max(1, int(nodes_days))
         now = now_epoch()
         since_window = now - hours * 3600
         since_1h = now - 1 * 3600
+        since_nodes = now - nodes_days * 86400
         with self._lock:
             counters = self._get_counters()
             hourly_window = self._get_hourly(since_window)
             hourly_1 = self._get_hourly(since_1h)
             top_from = self._get_top(kind="from", limit=top_limit)
             top_to = self._get_top(kind="to", limit=top_limit)
+            nodes_visible = self._get_node_visibility(since_nodes, limit=top_limit)
+            nodes_zero_hops = self._get_node_zero_hops(since_nodes, limit=top_limit)
             events = self._get_events(limit=event_limit)
             app_counts = self._get_app_counts()
             app_requests_to_me = self._get_app_requests_to_me(local_node_id)
@@ -374,6 +383,10 @@ class StatsDB:
             hourly_window=hourly_window,
             top_from=top_from,
             top_to=top_to,
+            nodes_window_days=nodes_days,
+            nodes_history_interval_sec=int(self._nodes_history_interval_sec),
+            nodes_visible=nodes_visible,
+            nodes_zero_hops=nodes_zero_hops,
             recent_events=events,
             app_counts=app_counts,
             app_requests_to_me=app_requests_to_me,
@@ -535,6 +548,63 @@ class StatsDB:
             if count <= 0:
                 continue
             out.append({"id": str(r["node_id"]), "short": r["short"], "long": r["long"], "count": count, "lastRx": r["last_rx"], "lastSnr": r["last_snr"], "lastRssi": r["last_rssi"]})
+        return out
+    def _node_history_seconds(self, count: int) -> Optional[int]:
+        interval = int(self._nodes_history_interval_sec)
+        if interval <= 0:
+            return None
+        return int(count) * interval
+    def _get_node_visibility(self, since_epoch: int, *, limit: int) -> List[Dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT nh.node_id, COUNT(*) AS cnt, nc.short, nc.long "
+            "FROM node_history nh "
+            "LEFT JOIN node_counts nc ON nc.node_id = nh.node_id "
+            "WHERE nh.ts >= ? "
+            "GROUP BY nh.node_id "
+            "ORDER BY cnt DESC "
+            "LIMIT ?",
+            (int(since_epoch), int(limit)),
+        ).fetchall()
+        out = []
+        for r in rows:
+            count = int(r["cnt"])
+            if count <= 0:
+                continue
+            out.append(
+                {
+                    "id": str(r["node_id"]),
+                    "short": r["short"],
+                    "long": r["long"],
+                    "snapshots": count,
+                    "seconds": self._node_history_seconds(count),
+                }
+            )
+        return out
+    def _get_node_zero_hops(self, since_epoch: int, *, limit: int) -> List[Dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT nh.node_id, COUNT(*) AS cnt, nc.short, nc.long "
+            "FROM node_history nh "
+            "LEFT JOIN node_counts nc ON nc.node_id = nh.node_id "
+            "WHERE nh.ts >= ? AND nh.hops_away = 0 "
+            "GROUP BY nh.node_id "
+            "ORDER BY cnt DESC "
+            "LIMIT ?",
+            (int(since_epoch), int(limit)),
+        ).fetchall()
+        out = []
+        for r in rows:
+            count = int(r["cnt"])
+            if count <= 0:
+                continue
+            out.append(
+                {
+                    "id": str(r["node_id"]),
+                    "short": r["short"],
+                    "long": r["long"],
+                    "snapshots": count,
+                    "seconds": self._node_history_seconds(count),
+                }
+            )
         return out
     def _get_events(self, *, limit: int) -> List[Dict[str, Any]]:
         rows = self._conn.execute(

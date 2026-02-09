@@ -524,6 +524,7 @@ def create_app(
         if stats_db is None:
             return jsonify({"ok": False, "error": "stats disabled", "generatedAt": now_epoch()})
         hours = _get_env_int("STATS_WINDOW_HOURS", 24)
+        nodes_days = _get_env_int("STATS_NODES_DAYS", 7)
         local_id = None
         getter = getattr(mesh_service, "get_radio_snapshot", None)
         if callable(getter):
@@ -531,7 +532,7 @@ def create_app(
                 local_id = _local_node_id(getter())
             except Exception:
                 local_id = None
-        summary = stats_db.summary(hours=hours, local_node_id=local_id)
+        summary = stats_db.summary(hours=hours, nodes_days=nodes_days, local_node_id=local_id)
         cfg = mesh_service.get_config()
         configured = _is_configured(cfg)
         status_series = []
@@ -566,6 +567,10 @@ def create_app(
                 "nodes": {
                     "topFrom": summary.top_from,
                     "topTo": summary.top_to,
+                    "mostVisible": summary.nodes_visible,
+                    "zeroHop": summary.nodes_zero_hops,
+                    "windowDays": summary.nodes_window_days,
+                    "historyIntervalSec": summary.nodes_history_interval_sec,
                 },
                 "events": summary.recent_events,
                 "status": {

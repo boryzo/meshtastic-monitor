@@ -1166,6 +1166,8 @@ function renderStats(data) {
       "statsAppRequests",
       "statsTopFrom",
       "statsTopTo",
+      "statsMostVisible",
+      "statsZeroHop",
       "statsEvents",
       "statsStatusSummary",
       "statsBattery",
@@ -1283,6 +1285,34 @@ function renderStats(data) {
         <div class="muted">${n.lastRssi !== null && n.lastRssi !== undefined ? `RSSI ${n.lastRssi}` : ""}</div>
       </div>`,
     "No outgoing yet"
+  );
+  renderList(
+    "statsMostVisible",
+    nodes.mostVisible || [],
+    (n) => {
+      const seconds = n.seconds ?? null;
+      const timeLabel = seconds ? fmtAge(seconds) : "—";
+      return `<div class="list-row">
+        <div>${nodeLabelHtml(n)}</div>
+        <div>${fmtCount(n.snapshots)} snaps</div>
+        <div class="muted">${escapeHtml(timeLabel)}</div>
+      </div>`;
+    },
+    "No visibility history"
+  );
+  renderList(
+    "statsZeroHop",
+    nodes.zeroHop || [],
+    (n) => {
+      const seconds = n.seconds ?? null;
+      const timeLabel = seconds ? fmtAge(seconds) : "—";
+      return `<div class="list-row">
+        <div>${nodeLabelHtml(n)}</div>
+        <div>${fmtCount(n.snapshots)} snaps</div>
+        <div class="muted">${escapeHtml(timeLabel)}</div>
+      </div>`;
+    },
+    "No zero-hop history"
   );
   renderList(
     "statsEvents",

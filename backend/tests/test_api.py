@@ -471,6 +471,11 @@ def test_stats_ok(client):
     assert "apps" in body
     assert "counts" in body["apps"]
     assert "requestsToMe" in body["apps"]
+    assert "nodes" in body
+    assert "mostVisible" in body["nodes"]
+    assert "zeroHop" in body["nodes"]
+    assert "windowDays" in body["nodes"]
+    assert "historyIntervalSec" in body["nodes"]
 
 
 def test_stats_returns_503_when_disabled():
