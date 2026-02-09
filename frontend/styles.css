@@ -195,6 +195,14 @@ body {
   padding: 6px 10px;
   font-size: 12px;
 }
+.input.medium {
+  width: 100%;
+  max-width: 360px;
+}
+.input.short {
+  width: 100%;
+  max-width: 140px;
+}
 .input:focus {
   border-color: rgba(79, 140, 255, 0.55);
   box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.12);
@@ -441,6 +449,22 @@ textarea.input {
   margin-top: 6px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
+}
+.hint-row {
+  margin-top: 6px;
+}
+.hint-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: help;
 }
 
 .backdrop {

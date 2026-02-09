@@ -266,7 +266,7 @@
         <div class="settings-body">
           <div class="field">
             <label for="apiBaseUrl">API Base URL (optional)</label>
-            <input id="apiBaseUrl" class="input" placeholder="http://localhost:8080" />
+            <input id="apiBaseUrl" class="input medium" placeholder="http://localhost:8080" />
             <div class="hint">Leave blank when using the built-in UI.</div>
           </div>
 
@@ -314,7 +314,7 @@
 
           <div class="field">
             <label for="smsApiUrl">SMS API URL</label>
-            <input id="smsApiUrl" class="input" placeholder="https://your-sms-gateway.example/api" />
+            <input id="smsApiUrl" class="input medium" placeholder="https://your-sms-gateway.example/api" />
           </div>
 
           <div class="row">
@@ -325,7 +325,15 @@
             <div class="field">
               <label for="smsApiKey">SMS API Key</label>
               <input id="smsApiKey" class="input" placeholder="••••" type="password" />
-              <div class="hint" id="smsKeyHint">Leave blank to keep existing key.</div>
+              <div class="hint-row">
+                <span
+                  id="smsKeyHint"
+                  class="hint-icon"
+                  title="Leave blank to keep existing key."
+                  aria-label="Leave blank to keep existing key."
+                  >ⓘ</span
+                >
+              </div>
             </div>
           </div>
 
@@ -346,7 +354,7 @@
 
           <div class="field">
             <label for="statsCacheMinutes">Stats cache (minutes)</label>
-            <input id="statsCacheMinutes" class="input" placeholder="30" inputmode="numeric" />
+            <input id="statsCacheMinutes" class="input short" placeholder="30" inputmode="numeric" />
             <div class="hint">Recompute heavy stats on a schedule (default 30 minutes).</div>
           </div>
         </div>

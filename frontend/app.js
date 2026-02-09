@@ -46,6 +46,19 @@ function fmtAge(ageSec) {
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
 }
+function fmtDuration(totalSeconds) {
+  if (totalSeconds === null || totalSeconds === undefined) return "—";
+  let s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  s -= h * 3600;
+  const m = Math.floor(s / 60);
+  s -= m * 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (h > 0 || m > 0) parts.push(`${m}min`);
+  if (s > 0 || (!h && !m)) parts.push(`${s}sec`);
+  return parts.join("");
+}
 function fmtTime(epoch) {
   if (!epoch) return "—";
   const d = new Date(epoch * 1000);
@@ -1364,16 +1377,15 @@ function renderStats(data) {
     nodes.mostVisible || [],
     (n) => {
       const seconds = n.seconds ?? null;
-      const timeLabel = seconds ? fmtAge(seconds) : "—";
+      const timeLabel = seconds ? fmtDuration(seconds) : "—";
       const pct =
         n.availabilityPct !== null && n.availabilityPct !== undefined
           ? `${n.availabilityPct}%`
           : null;
-      const meta = [timeLabel, pct].filter(Boolean).join(" • ");
       return `<div class="list-row">
         <div>${nodeLabelHtml(n)}</div>
-        <div>${fmtCount(n.snapshots)} snaps</div>
-        <div class="muted">${escapeHtml(meta || "—")}</div>
+        <div>${escapeHtml(timeLabel)}</div>
+        <div class="muted">${escapeHtml(pct || "—")}</div>
       </div>`;
     },
     "No visibility history"
@@ -1383,11 +1395,11 @@ function renderStats(data) {
     nodes.zeroHop || [],
     (n) => {
       const seconds = n.seconds ?? null;
-      const timeLabel = seconds ? fmtAge(seconds) : "—";
+      const timeLabel = seconds ? fmtDuration(seconds) : "—";
       return `<div class="list-row">
         <div>${nodeLabelHtml(n)}</div>
-        <div>${fmtCount(n.snapshots)} snaps</div>
-        <div class="muted">${escapeHtml(timeLabel)}</div>
+        <div>${escapeHtml(timeLabel)}</div>
+        <div class="muted">—</div>
       </div>`;
     },
     "No zero-hop history"
@@ -1509,11 +1521,11 @@ function closeNodeModal() {
 function setSmsKeyHint(apiKeySet) {
   const hint = $("smsKeyHint");
   if (!hint) return;
-  if (apiKeySet) {
-    hint.textContent = "API key is saved. Leave blank to keep it.";
-  } else {
-    hint.textContent = "Leave blank to keep existing key.";
-  }
+  const text = apiKeySet
+    ? "API key is saved. Leave blank to keep it."
+    : "Leave blank to keep existing key.";
+  hint.setAttribute("title", text);
+  hint.setAttribute("aria-label", text);
 }
 async function loadSettingsPanel() {
   $("apiBaseUrl").value = localStorage.getItem(LS.apiBaseUrl) || "";
