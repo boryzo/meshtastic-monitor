@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import threading
 import time
 import urllib.error
@@ -33,7 +34,7 @@ def _payload_utf8_info(payload: Any) -> tuple[Optional[int], Optional[bool]]:
         try:
             payload.decode("utf-8")
             return len(payload), True
-        except Exception:
+        except (UnicodeDecodeError, AttributeError):
             return len(payload), False
     if isinstance(payload, str):
         return len(payload), True
@@ -456,15 +457,21 @@ class MeshService:
         if not url:
             return None, None, "mesh host not configured"
         try:
-            with urllib.request.urlopen(url, timeout=self._status_timeout_sec) as resp:
+            # Create SSL context for HTTPS connections with certificate verification
+            ssl_context = ssl.create_default_context()
+            # For local mesh devices, we might need to handle self-signed certs
+            # but we'll start with strict verification for security
+            with urllib.request.urlopen(url, timeout=self._status_timeout_sec, context=ssl_context) as resp:
                 payload = resp.read()
         except urllib.error.HTTPError as e:
             return None, None, f"HTTP {e.code}"
-        except Exception as e:
-            return None, None, f"{type(e).__name__}: {e}"
+        except urllib.error.URLError as e:
+            return None, None, f"URL error: {e.reason}"
+        except OSError as e:
+            return None, None, f"Network error: {type(e).__name__}: {e}"
         try:
             decoded = json.loads(payload.decode("utf-8", errors="ignore"))
-        except Exception as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
             return None, None, f"invalid JSON: {type(e).__name__}: {e}"
 
         if not isinstance(decoded, dict):

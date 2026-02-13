@@ -26,7 +26,8 @@ def _parse_int(value: Optional[str], default: int) -> int:
         return default
     try:
         return int(value)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.warning("Failed to parse integer value '%s': %s", value, e)
         return default
 def _get_env_float(name: str, default: float) -> float:
     return _parse_float(os.getenv(name), default)
@@ -35,7 +36,8 @@ def _parse_float(value: Optional[str], default: float) -> float:
         return default
     try:
         return float(value)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.warning("Failed to parse float value '%s': %s", value, e)
         return default
 def _parse_bool_env(value: Optional[str], default: bool = False) -> bool:
     if value is None or value == "":
@@ -109,7 +111,8 @@ def _default_frontend_path() -> Path:
         from importlib import resources
 
         return Path(resources.files("frontend"))
-    except Exception:
+    except (ImportError, AttributeError, TypeError) as e:
+        logger.warning("Failed to load frontend from package resources: %s", e)
         return candidate
 
 
@@ -156,7 +159,8 @@ class StatsCache:
             if callable(self._local_id_fn):
                 try:
                     local_id = self._local_id_fn()
-                except Exception:
+                except (AttributeError, TypeError, RuntimeError) as e:
+                    logger.warning("Failed to get local node ID: %s", e)
                     local_id = None
             summary = self._stats_db.summary(
                 hours=self._hours,
@@ -169,7 +173,8 @@ class StatsCache:
                 status_series = self._stats_db.list_status_reports(limit=120, order="asc")
                 if status_series:
                     status_latest = status_series[-1]
-            except Exception:
+            except (ValueError, RuntimeError, OSError) as e:
+                logger.warning("Failed to load status reports: %s", e)
                 status_series = []
             with self._lock:
                 self._summary = summary
@@ -177,7 +182,7 @@ class StatsCache:
                 self._status_series = status_series
                 self._last_error = None
         except Exception as e:
-            logging.getLogger("meshtastic_monitor.stats").warning("Stats refresh failed: %s", e)
+            logging.getLogger("meshtastic_monitor.stats").warning("Stats refresh failed: %s", e, exc_info=True)
             with self._lock:
                 self._last_error = f"{type(e).__name__}: {e}"
 
@@ -238,8 +243,8 @@ def create_app(
                     relay.start()
                     connect_host = "127.0.0.1" if relay_host in {"0.0.0.0", "::", ""} else relay_host
                     connect_port = relay.listen_port
-                except Exception as e:
-                    logging.warning("Failed to start TCP relay: %s", e)
+                except (OSError, RuntimeError, ValueError) as e:
+                    logging.warning("Failed to start TCP relay: %s", e, exc_info=True)
         if stats_db is None:
             stats_path = os.getenv("STATS_DB_PATH", "meshmon.db").strip()
             if stats_path.lower() not in {"", "off", "none", "disabled"}:
@@ -554,7 +559,8 @@ def create_app(
         if callable(getter):
             try:
                 device = getter(include_secrets=include_secrets)
-            except Exception:
+            except (AttributeError, TypeError, RuntimeError, OSError) as e:
+                logger.warning("Failed to get device config: %s", e)
                 device = None
         if device is None:
             return (
@@ -589,7 +595,8 @@ def create_app(
         try:
             nodes = mesh_service.get_nodes_snapshot()
             node = nodes.get(node_id)
-        except Exception:
+        except (AttributeError, TypeError, KeyError) as e:
+            logger.warning("Failed to get node %s: %s", node_id, e)
             node = None
         stats = None
         if stats_db is not None:
@@ -728,7 +735,7 @@ def create_app(
         if channel is not None:
             try:
                 channel_clean = int(channel)
-            except Exception:
+            except (ValueError, TypeError):
                 return jsonify({"ok": False, "error": "channel must be an int"}), 400
             if channel_clean < 0:
                 return jsonify({"ok": False, "error": "channel must be >= 0"}), 400
@@ -738,7 +745,8 @@ def create_app(
             if callable(recorder):
                 try:
                     recorder(text.strip(), to_clean, channel_clean)
-                except Exception:
+                except (AttributeError, TypeError, RuntimeError) as e:
+                    logger.warning("Failed to record outgoing text: %s", e)
                     pass
             if stats_db is not None:
                 stats_db.record_send(ok=True)
@@ -780,7 +788,7 @@ def create_app(
         if mesh_port is not None:
             try:
                 kwargs["mesh_port"] = int(mesh_port)
-            except Exception:
+            except (ValueError, TypeError):
                 return jsonify({"ok": False, "error": "meshPort must be an int"}), 400
         if sms_enabled is not None:
             parsed = _parse_bool_value(sms_enabled)
@@ -790,7 +798,11 @@ def create_app(
         if sms_api_url is not None:
             if not isinstance(sms_api_url, str):
                 return jsonify({"ok": False, "error": "smsApiUrl must be a string"}), 400
-            sms_kwargs["api_url"] = sms_api_url.strip()
+            url = sms_api_url.strip()
+            # Basic URL validation
+            if url and not url.startswith(("http://", "https://")):
+                return jsonify({"ok": False, "error": "smsApiUrl must start with http:// or https://"}), 400
+            sms_kwargs["api_url"] = url
         if sms_api_key is not None:
             if not isinstance(sms_api_key, str):
                 return jsonify({"ok": False, "error": "smsApiKey must be a string"}), 400
@@ -798,7 +810,18 @@ def create_app(
         if sms_phone is not None:
             if not isinstance(sms_phone, str):
                 return jsonify({"ok": False, "error": "smsPhone must be a string"}), 400
-            sms_kwargs["phone"] = sms_phone.strip()
+            phone = sms_phone.strip()
+            # Phone number validation: must contain at least one digit and only valid chars
+            if phone:
+                if not any(c.isdigit() for c in phone):
+                    return jsonify({"ok": False, "error": "smsPhone must contain at least one digit"}), 400
+                if not all(c.isdigit() or c in "+-() " for c in phone):
+                    return jsonify({"ok": False, "error": "smsPhone contains invalid characters"}), 400
+                # Remove spaces to check structure
+                phone_no_spaces = phone.replace(" ", "")
+                if not phone_no_spaces or phone_no_spaces in ["++", "+-", "-+", "--"]:
+                    return jsonify({"ok": False, "error": "smsPhone has invalid format"}), 400
+            sms_kwargs["phone"] = phone
         if sms_allow_from_ids is not None:
             if not isinstance(sms_allow_from_ids, str):
                 return jsonify({"ok": False, "error": "smsAllowFromIds must be a string"}), 400
@@ -819,7 +842,7 @@ def create_app(
         if relay_port is not None:
             try:
                 relay_port_val = int(relay_port)
-            except Exception:
+            except (ValueError, TypeError):
                 return jsonify({"ok": False, "error": "relayPort must be an int"}), 400
             if relay_port_val <= 0 or relay_port_val > 65535:
                 return jsonify({"ok": False, "error": "relayPort must be 1..65535"}), 400
@@ -827,7 +850,7 @@ def create_app(
         if stats_cache_minutes is not None:
             try:
                 stats_cache_val = int(stats_cache_minutes)
-            except Exception:
+            except (ValueError, TypeError):
                 return jsonify({"ok": False, "error": "statsCacheMinutes must be an int"}), 400
             if stats_cache_val < 1:
                 return jsonify({"ok": False, "error": "statsCacheMinutes must be >= 1"}), 400

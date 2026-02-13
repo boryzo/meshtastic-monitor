@@ -233,6 +233,9 @@ To reset history: stop the app and delete `meshmon.db`.
 - There is **no login/auth**. Run this only on a trusted network.
 - `GET /api/device/config` redacts PSKs by default.
   - `GET /api/device/config?includeSecrets=1` will include secrets — do this only if you understand the risk.
+- SMS relay uses POST with JSON body (API keys not exposed in URLs)
+- SSL/TLS certificate verification is enabled by default for HTTPS connections
+- For detailed security information and best practices, see [SECURITY.md](SECURITY.md)
 
 ## API (for developers)
 

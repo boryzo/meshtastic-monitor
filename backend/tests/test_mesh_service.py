@@ -56,7 +56,7 @@ def test_status_fetch_populates_report_and_stats(monkeypatch):
         def __exit__(self, exc_type, exc, tb):  # noqa: D401, ANN001
             return False
 
-    def _fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def _fake_urlopen(url, timeout=None, context=None):  # noqa: ANN001
         assert url == "http://192.0.2.10/json/report"
         return _DummyResponse(payload)
 

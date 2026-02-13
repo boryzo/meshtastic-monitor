@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import urllib.error
 import urllib.parse
 
@@ -50,9 +51,13 @@ def test_sms_relay_sends_and_logs_without_url_or_key(monkeypatch, caplog):
     api_key = "SECRETKEY"
     phone = "600000000"
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
-        assert api_key in url
-        assert api_url in url
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
+        # Now expects a Request object with POST data
+        assert hasattr(req, 'data')
+        data = json.loads(req.data.decode('utf-8'))
+        assert data['api_key'] == api_key
+        assert data['phone'] == phone
+        assert req.get_full_url() == api_url
         return _DummyResponse(status=200, body=b"OK")
 
     monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
@@ -85,7 +90,7 @@ def test_sms_relay_redacts_key_from_response(monkeypatch, caplog):
     encoded = urllib.parse.quote_plus(api_key)
     body = f"ok key={api_key} enc={encoded}".encode("utf-8")
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
         return _DummyResponse(status=200, body=body)
 
     monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
@@ -122,7 +127,7 @@ def test_sms_relay_http_error_logs_without_key(monkeypatch, caplog):
         fp=io.BytesIO(body),
     )
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
         raise err
 
     monkeypatch.setattr(sms_relay.urllib.request, "urlopen", fake_urlopen)
@@ -147,7 +152,7 @@ def test_sms_relay_http_error_logs_without_key(monkeypatch, caplog):
 def test_sms_relay_disabled_does_not_call_gateway(monkeypatch):
     called = {"ok": False}
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
         called["ok"] = True
         return _DummyResponse()
 
@@ -163,7 +168,7 @@ def test_sms_relay_disabled_does_not_call_gateway(monkeypatch):
 def test_sms_relay_filters_by_from_id(monkeypatch):
     called = {"ok": False}
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
         called["ok"] = True
         return _DummyResponse()
 
@@ -184,7 +189,7 @@ def test_sms_relay_filters_by_from_id(monkeypatch):
 def test_sms_relay_filters_by_type(monkeypatch):
     called = {"ok": False}
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
         called["ok"] = True
         return _DummyResponse()
 
@@ -279,7 +284,7 @@ def test_sms_relay_replaces_common_emojis():
 def test_sms_relay_skips_when_no_text(monkeypatch):
     called = {"ok": False}
 
-    def fake_urlopen(url, timeout=None):  # noqa: ANN001
+    def fake_urlopen(req, timeout=None, context=None):  # noqa: ANN001
         called["ok"] = True
         return _DummyResponse()
 
